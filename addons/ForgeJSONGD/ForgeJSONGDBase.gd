@@ -28,6 +28,8 @@ static func _get_gdscript(hint_class: String) -> Script:
 	for className: Dictionary in ProjectSettings.get_global_class_list():
 		if className.class == hint_class:
 			return load(className.path)
+	if ResourceLoader.exists(hint_class):
+		return load(hint_class)
 	return null
 
 ## Extracts the main path from a resource path (removes node path if present).

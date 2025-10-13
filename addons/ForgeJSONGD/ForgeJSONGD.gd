@@ -42,6 +42,8 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 		
 		# Skip the built-in 'script' property
 		if property_name == "script":
+			if specify_class and dictionary.get(SCRIPT_INHERITANCE).is_empty():
+				dictionary.set(SCRIPT_INHERITANCE, _class.get_script().resource_path) # In case the class isn't global
 			continue
 		var property_value: Variant = _class.get(property_name)
 		# Only serialize properties that are exported or marked for storage
@@ -63,7 +65,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 						# Recursively serialize the nested resource
 						dictionary.set(property_name, class_to_json(property_value))
 				else:
-					dictionary.set(property_name, class_to_json(property_value, property.class_name != property_value.get_script().get_global_name()))
+					dictionary.set(property_name, class_to_json(property_value, property.get("class_name") != property_value.get_script().get_global_name()))
 			# Special handling for Vector types (store as strings)
 			elif type_string(typeof(property_value)).begins_with("Vector"):
 				dictionary[property_name] = var_to_str(property_value)
@@ -72,8 +74,8 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 				dictionary.set(property_name, property_value.to_html())
 			else:
 				# Store other basic types directly
-				if property_type == TYPE_INT and property.hint == PROPERTY_HINT_ENUM:
-					var enum_params: String = property.hint_string
+				if property_type == TYPE_INT and property.get("hint") == PROPERTY_HINT_ENUM:
+					var enum_params: String = property.get("hint_string")
 					for enum_value: String in enum_params.split(","):
 						if enum_value.contains(":"):
 							if property_value == str_to_var(enum_value.split(":")[1]):
@@ -197,7 +199,7 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 						if value is Dictionary and value.has(SCRIPT_INHERITANCE):
 							script_type = _get_gdscript(value.get(SCRIPT_INHERITANCE))
 						else:
-							script_type = _get_gdscript(property.class_name )
+							script_type = _get_gdscript(property.get("class_name"))
 							
 						# If the value is a resource path, load the resource
 						if value is String and value.is_absolute_path():

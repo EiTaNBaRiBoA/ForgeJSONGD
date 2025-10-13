@@ -155,7 +155,7 @@ First, create the C\# class you want to serialize. For best results, have it inh
 
 ```csharp
 using Godot;
-
+[GlobalClass]
 public partial class Data : GodotObject
 {
 	[Export]

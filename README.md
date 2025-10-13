@@ -1,4 +1,4 @@
-# JsonForge
+# JsonForgeGD
 
 Simplify your Godot save/load systems with this GDScript singleton. Effortlessly serialize any class to JSON and deserialize back, with automatic handling of Godot types. Go beyond basic conversion with advanced tools to compare, find differences, and apply patches to your game or app data.
 
@@ -35,12 +35,12 @@ Simplify your Godot save/load systems with this GDScript singleton. Effortlessly
 
 ### Toggling Export-Only Mode
 
-By default, **JsonForge** serializes all script variables. You can change this behavior to only serialize variables marked with `@export` by setting a static variable.
+By default, **JsonForgeGD** serializes all script variables. You can change this behavior to only serialize variables marked with `@export` by setting a static variable.
 
 ```gdscript
 # Set this to true to only save/load properties marked with @export.
 # This is false by default, meaning all script variables are saved.
-JsonForge.only_exported_values = true
+JsonForgeGD.only_exported_values = true
 ```
 
 ## Usage
@@ -55,18 +55,18 @@ var player_data = PlayerData.new()
 # ... Set properties of player_data ...
 
 # Convert to a JSON dictionary:
-var json_data = JsonForge.class_to_json(player_data)
+var json_data = JsonForgeGD.class_to_json(player_data)
 
 # json_data now holds a Dictionary representation of your class instance.
 
 # Convert a Class Instance to a JSON String
-var json_string: String = JsonForge.class_to_json_string(player_data)
+var json_string: String = JsonForgeGD.class_to_json_string(player_data)
 ```
 
 **b) Save JSON Data to a File:**
 
 ```gdscript
-var file_success: bool = JsonForge.store_json_file("user://saves/player_data.json", json_data, "my_secret_key") # Optional encryption key
+var file_success: bool = JsonForgeGD.store_json_file("user://saves/player_data.json", json_data, "my_secret_key") # Optional encryption key
 
 # Check if saving was successful:
 if file_success:
@@ -80,7 +80,7 @@ else:
 **a) Load JSON Data from a File:**
 
 ```gdscript
-var loaded_data: PlayerData = JsonForge.json_file_to_class(PlayerData, "user://saves/player_data.json", "your_secret_key")
+var loaded_data: PlayerData = JsonForgeGD.json_file_to_class(PlayerData, "user://saves/player_data.json", "your_secret_key")
 
 if loaded_data:
     # ... Access properties of loaded_data ...
@@ -92,19 +92,19 @@ else:
 
 ```gdscript
 var json_string = '{ "name": "Alice", "score": 1500 }'
-var player_data: PlayerData = JsonForge.json_string_to_class(PlayerData, json_string)
+var player_data: PlayerData = JsonForgeGD.json_string_to_class(PlayerData, json_string)
 ```
 
 **c) Convert a JSON Dictionary to a Class Instance:**
 
 ```gdscript
 var json_dict = { "name": "Bob", "score": 2000 }
-var player_data: PlayerData = JsonForge.json_to_class(PlayerData, json_dict)
+var player_data: PlayerData = JsonForgeGD.json_to_class(PlayerData, json_dict)
 ```
 
 ## Important Notes
 
-  * **Supported Properties:** By default, all script variables are serialized. To serialize **only** properties marked with `@export`, set `JsonForge.only_exported_values = true`.
+  * **Supported Properties:** By default, all script variables are serialized. To serialize **only** properties marked with `@export`, set `JsonForgeGD.only_exported_values = true`.
   * **Error Handling:** Implement robust error handling in your project to catch potential issues like file loading failures or JSON parsing errors.
 
 ## Example Class (PlayerData.gd)
@@ -128,10 +128,10 @@ player.score = 100
 player.inventory = ["Sword", "Potion"]
 
 # Save the player data to a JSON file
-JsonForge.store_json_file("user://player.sav", JsonForge.class_to_json(player))
+JsonForgeGD.store_json_file("user://player.sav", JsonForgeGD.class_to_json(player))
 
 # Load the player data from the JSON file
-var loaded_player: PlayerData = JsonForge.json_file_to_class(PlayerData, "user://player.sav")
+var loaded_player: PlayerData = JsonForgeGD.json_file_to_class(PlayerData, "user://player.sav")
 
 # Print the loaded player's name
 print(loaded_player.name) # Output: Bob
@@ -150,10 +150,10 @@ var dict1 = {"name": "Alice", "score": 100}
 var dict2 = {"name": "Alice", "score": 100}
 var dict3 = {"name": "Bob", "score": 150}
 
-var are_equal = JsonForge.check_equal_jsons(dict1, dict2)
+var are_equal = JsonForgeGD.check_equal_jsons(dict1, dict2)
 print(are_equal) # Output: true
 
-var are_different = JsonForge.check_equal_jsons(dict1, dict3)
+var are_different = JsonForgeGD.check_equal_jsons(dict1, dict3)
 print(are_different) # Output: false
 ```
 
@@ -165,7 +165,7 @@ Generate a dictionary that highlights the differences between two JSON objects.
 var old_data = {"name": "Player1", "level": 5, "items": ["sword"]}
 var new_data = {"name": "Player1", "level": 6, "items": ["sword", "shield"], "new_key": "value"}
 
-var diff = JsonForge.compare_jsons_diff(old_data, new_data)
+var diff = JsonForgeGD.compare_jsons_diff(old_data, new_data)
 # diff will contain a detailed report of the changes.
 print(diff)
 ```
@@ -174,7 +174,7 @@ print(diff)
 
 Apply changes from one JSON object to another using a specific operation. This is useful for patching, merging, removing, syncing data.
 
-The available operations are defined in the `JsonForge.Operation` enum:
+The available operations are defined in the `JsonForgeGD.Operation` enum:
 
   * `Add`: Adds keys from the reference JSON. If a key already exists, it combines the old and new values into an array.
   * `AddDiffer`: Adds keys from the reference JSON that do not exist, and merges values for keys that have different values.
@@ -190,26 +190,26 @@ var reference_json = {"b": 20, "c": 3, "d": 4} # reference_json can be an class 
 
 # --- Operation: Add ---
 # Merges values for "b" and "c", and adds "d".
-var add_result = JsonForge.json_operation(source_json, reference_json, JsonForge.Operation.Add)
+var add_result = JsonForgeGD.json_operation(source_json, reference_json, JsonForgeGD.Operation.Add)
 print(add_result) # Output: {"a": 1, "b": [2, 20], "c": [3, 3], "d": 4}
 
 # --- Operation: AddDiffer ---
 # Merges "b" because values differ, keeps "c" as is, and adds "d".
-var add_differ_result = JsonForge.json_operation(source_json, reference_json, JsonForge.Operation.AddDiffer)
+var add_differ_result = JsonForgeGD.json_operation(source_json, reference_json, JsonForgeGD.Operation.AddDiffer)
 print(add_differ_result) # Output: {"a": 1, "b": [2, 20], "c": 3, "d": 4}
 
 # --- Operation: Replace ---
 # Replaces the value of "b" with 20.
-var replace_result = JsonForge.json_operation(source_json, reference_json, JsonForge.Operation.Replace)
+var replace_result = JsonForgeGD.json_operation(source_json, reference_json, JsonForgeGD.Operation.Replace)
 print(replace_result) # Output: {"a": 1, "b": 20, "c": 3}
 
 # --- Operation: Remove ---
 # Removes "b" and "c" because their keys exist in reference_json.
-var remove_result = JsonForge.json_operation(source_json, reference_json, JsonForge.Operation.Remove)
+var remove_result = JsonForgeGD.json_operation(source_json, reference_json, JsonForgeGD.Operation.Remove)
 print(remove_result) # Output: {"a": 1}
 
 # --- Operation: RemoveValue ---
 # Removes "c" because both key and value match. Does not remove "b" because values differ.
-var remove_value_result = JsonForge.json_operation(source_json, reference_json, JsonForge.Operation.RemoveValue)
+var remove_value_result = JsonForgeGD.json_operation(source_json, reference_json, JsonForgeGD.Operation.RemoveValue)
 print(remove_value_result) # Output: {"a": 1, "b": 2}
 ```

@@ -110,7 +110,7 @@ var loaded_data: Dictionary = ForgeJSONGD.json_file_to_dict("user://saves/player
 if loaded_data:
 	# ... Access properties of loaded_data ...
 else:
-	print("Error loading player data.")
+	print("Error loading data.")
 ```
 
 ## Example Class (PlayerData.gd)

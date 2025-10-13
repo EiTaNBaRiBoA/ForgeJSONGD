@@ -172,8 +172,8 @@ static func json_to_class(gdscript_or_instace: Variant, json: Dictionary) -> Obj
 			value = str_to_var(value)
 			
 		# Find the matching property in the target class
+		var script_language = _class.get_script()
 		for property: Dictionary in properties:
-			var script_language = _class.get_script()
 			var property_name: String = property.get("name")
 			var property_type: Variant = property.get("type")
 			# Skip the 'script' property (built-in)

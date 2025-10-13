@@ -23,8 +23,8 @@ static func _check_cast_class(gdscript_or_instace: Variant) -> bool:
 static func _check_valid_property(property: Variant) -> bool:
 	return property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and (!only_exported_values or property.usage & PROPERTY_USAGE_STORAGE)
 
-## Helper function to find a GDScript by its class name.
-static func _get_gdscript(hint_class: String) -> GDScript:
+## Helper function to find a Script by its class name.
+static func _get_gdscript(hint_class: String) -> Script:
 	for className: Dictionary in ProjectSettings.get_global_class_list():
 		if className.class == hint_class:
 			return load(className.path)
@@ -107,8 +107,8 @@ static func _serialize_variant(variant_value: Variant, is_parent_typed: bool = f
 
 ## Helper function to recursively convert a JSON dictionary into a target dictionary.
 static func _convert_json_to_dictionary(property_dict: Dictionary, json_dict: Dictionary) -> void:
-	var key_type_script: GDScript = property_dict.get_typed_key_script()
-	var value_type_script: GDScript = property_dict.get_typed_value_script()
+	var key_type_script: Script = property_dict.get_typed_key_script()
+	var value_type_script: Script = property_dict.get_typed_value_script()
 	for json_key: Variant in json_dict:
 		var json_value: Variant = json_dict.get(json_key)
 		var converted_key: Variant = _convert_variant(json_key, key_type_script)
@@ -127,11 +127,11 @@ static func _convert_variant(json_variant: Variant, type: Variant = null) -> Var
 	var processed_variant: Variant = json_variant
 	# Process the variant based on its actual type.
 	if processed_variant is Dictionary or type is Object:
-		var script: GDScript = null
+		var script: Script = null
 		if SCRIPT_INHERITANCE in processed_variant:
 			# Prioritize script path embedded in the JSON data.
 			script = _get_gdscript(processed_variant.get(SCRIPT_INHERITANCE))
-		elif type is GDScript:
+		elif type is Script:
 			# Fallback to the type hint from the parent array/dictionary.
 			script = load(type.get_path())
 		

@@ -95,9 +95,6 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 ## Loads a JSON file and converts its contents into a Godot class instance.
 ## Uses the provided GDScript (castClass) as a template for the class.
 static func json_file_to_class(gdscript_or_instace: Variant, file_path: String, security_key: String = "") -> Object:
-	if not _check_cast_class(gdscript_or_instace):
-		printerr("The provided class is null.")
-		return null
 	var parsed_results = json_file_to_dict(file_path, security_key)
 	if parsed_results.is_empty() and gdscript_or_instace is Script:
 		return gdscript_or_instace.new()
@@ -106,9 +103,6 @@ static func json_file_to_class(gdscript_or_instace: Variant, file_path: String, 
 
 ## Converts a JSON string into a Godot class instance.
 static func json_string_to_class(gdscript_or_instace: Variant, json_string: String) -> Object:
-	if not _check_cast_class(gdscript_or_instace):
-		printerr("The provided class is null.")
-		return null
 	var json: JSON = JSON.new()
 	var parse_result: Error = json.parse(json_string)
 	if parse_result == Error.OK:

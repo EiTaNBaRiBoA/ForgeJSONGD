@@ -12,12 +12,6 @@ static func _check_dir(file_path: String) -> void:
 	if !DirAccess.dir_exists_absolute(file_path.get_base_dir()):
 		DirAccess.make_dir_absolute(file_path.get_base_dir())
 
-## Checks if the provided class is valid (not null)
-static func _check_cast_class(gdscript_or_instace: Variant) -> bool:
-	if typeof(gdscript_or_instace) == Variant.Type.TYPE_NIL:
-		printerr("The provided class or object is null.")
-		return false
-	return true
 
 ## Checks if a property should be included during serialization or deserialization. if script_type is not gdscript , then it is called from other languages
 static func _check_valid_property(property: Variant) -> bool:

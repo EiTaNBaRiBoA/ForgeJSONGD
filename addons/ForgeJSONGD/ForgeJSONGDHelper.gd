@@ -1,4 +1,4 @@
-@abstract class_name JsonForgeHelper extends JsonForgeBase
+@abstract class_name ForgeJSONGDHelper extends ForgeJSONGDBase
 
 #region Comparison
 
@@ -34,16 +34,16 @@ static func _compare_dictionaries(a: Dictionary, b: Dictionary) -> Dictionary:
 
 		if key_in_a and not key_in_b:
 			# Key was removed in 'b'.
-			diff[key] = {"old": a[key], "new": null}
+			diff.set(key, {"old": a.get(key), "new": null})
 		elif not key_in_a and key_in_b:
 			# Key was added in 'b'.
-			diff[key] = {"old": null, "new": b[key]}
+			diff.set(key,{"old": null, "new": b.get(key)})
 		else:
 			# Key exists in both, so we recurse to compare their values.
-			var result: Dictionary = compare_recursive(a[key], b[key])
+			var result: Dictionary = compare_recursive(a.get(key), b.get(key))
 			if not result.is_empty():
 				# If the recursive comparison found a difference, add it to our diff report.
-				diff[key] = result
+				diff.set(key,result)
 	return diff
 
 
@@ -77,18 +77,18 @@ static func _process_dictionary(base_dict: Dictionary, ref_dict: Dictionary, op_
 			var ref_value = ref_dict[key]
 			
 			if base_dict.has(key):
-				var base_value = base_dict[key]
+				var base_value = base_dict.get(key)
 				var result = apply_operation_recursively(base_value, ref_value, op_type)
 				
 				# For remove operations, a null result signifies deletion.
 				if result == null and (op_type == Operation.Remove or op_type == Operation.RemoveValue):
 					base_dict.erase(key)
 				else:
-					base_dict[key] = result
-			
+					base_dict.set(key,result)
+					
 			# If the key doesn't exist in base, add it (for relevant operations).
 			elif op_type == Operation.Add or op_type == Operation.AddDiffer or op_type == Operation.Replace:
-				base_dict[key] = ref_value
+				base_dict.set(key,ref_value)
 				
 	return base_dict
 

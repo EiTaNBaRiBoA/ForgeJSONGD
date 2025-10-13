@@ -1,4 +1,4 @@
-@abstract class_name JsonForgeBase
+@abstract class_name ForgeJSONGDBase
 
 const SCRIPT_INHERITANCE = "script_inheritance"
 
@@ -13,15 +13,19 @@ static func _check_dir(file_path: String) -> void:
 		DirAccess.make_dir_absolute(file_path.get_base_dir())
 
 ## Checks if the provided class is valid (not null)
-static func _check_cast_class(castClass: GDScript) -> bool:
-	if typeof(castClass) == Variant.Type.TYPE_NIL:
-		printerr("The provided class is null.")
+static func _check_cast_class(gdscript_or_instace: Variant) -> bool:
+	if typeof(gdscript_or_instace) == Variant.Type.TYPE_NIL:
+		printerr("The provided class or object is null.")
 		return false
 	return true
 
-## Checks if a property should be included during serialization or deserialization.
-static func _check_valid_property(property: Variant) -> bool:
-	return property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and (!only_exported_values or property.usage & PROPERTY_USAGE_STORAGE)
+## Checks if a property should be included during serialization or deserialization. if script_type is not gdscript , then it is called from other languages
+static func _check_valid_property(property: Variant, script_type : Variant) -> bool:
+	return ((property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and
+	 (!only_exported_values or property.usage & PROPERTY_USAGE_STORAGE))
+	 or 
+	 (script_type != GDScript and 
+	 (property.usage == PROPERTY_USAGE_STORAGE or property.usage == PROPERTY_USAGE_NONE)))
 
 ## Helper function to find a GDScript by its class name.
 static func _get_gdscript(hint_class: String) -> GDScript:
@@ -44,12 +48,12 @@ static func _get_dict_from_type(json: Variant) -> Dictionary:
 	if json is Dictionary:
 		dict = json
 	elif json is Object:
-		dict = JsonForge.class_to_json(json)
+		dict = ForgeJSONGD.class_to_json(json)
 	else:
 		var result = JSON.parse_string(json)
 		if result == null:
 			#first_json is not a file json string , loading it from path
-			dict = JsonForge.json_file_to_dict(json)
+			dict = ForgeJSONGD.json_file_to_dict(json)
 		else:
 			dict = result
 	return dict
@@ -84,7 +88,7 @@ static func _serialize_variant(variant_value: Variant, is_parent_typed: bool = f
 	if variant_value is Object:
 		# If the parent is typed, the script path isn't needed. If untyped, it is.
 		var specify_script = not is_parent_typed
-		return JsonForge.class_to_json(variant_value, specify_script)
+		return ForgeJSONGD.class_to_json(variant_value, specify_script)
 	elif variant_value is Array:
 		return convert_array_to_json(variant_value)
 	elif variant_value is Dictionary:
@@ -110,7 +114,7 @@ static func _convert_json_to_dictionary(property_dict: Dictionary, json_dict: Di
 	var key_type_script: GDScript = property_dict.get_typed_key_script()
 	var value_type_script: GDScript = property_dict.get_typed_value_script()
 	for json_key: Variant in json_dict:
-		var json_value: Variant = json_dict[json_key]
+		var json_value: Variant = json_dict.get(json_key)
 		var converted_key: Variant = _convert_variant(json_key, key_type_script)
 		var converted_value: Variant = _convert_variant(json_value, value_type_script)
 		property_dict.set(converted_key, converted_value)
@@ -137,8 +141,8 @@ static func _convert_variant(json_variant: Variant, type: Variant = null) -> Var
 		
 		if script != null:
 			if processed_variant is String:
-				return JsonForge.json_to_class(script, JSON.parse_string(processed_variant))
-			return JsonForge.json_to_class(script, processed_variant)
+				return ForgeJSONGD.json_to_class(script, JSON.parse_string(processed_variant))
+			return ForgeJSONGD.json_to_class(script, processed_variant)
 		else:
 			return processed_variant
 	elif processed_variant is Array:

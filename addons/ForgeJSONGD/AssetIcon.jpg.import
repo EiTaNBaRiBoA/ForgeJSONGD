@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cbt51sclatky7"
-path="res://.godot/imported/AssetIcon.jpg-3980b5ccf439a2fcdd9642db90c23db1.ctex"
+path="res://.godot/imported/AssetIcon.jpg-183f7a71974d1444cd2f2cd8ac0baba9.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://addons/JsonForge/addons/JsonForge/AssetIcon.jpg"
-dest_files=["res://.godot/imported/AssetIcon.jpg-3980b5ccf439a2fcdd9642db90c23db1.ctex"]
+source_file="res://addons/ForgeJSONGD/addons/ForgeJSONGD/AssetIcon.jpg"
+dest_files=["res://.godot/imported/AssetIcon.jpg-183f7a71974d1444cd2f2cd8ac0baba9.ctex"]
 
 [params]
 

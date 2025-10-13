@@ -143,9 +143,6 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 			var script_type: Script = _get_gdscript(script_name)
 			if script_type != null:
 				_class = script_type.new() as Object
-		# creating an empty object
-		elif typeof(script_or_instace) == TYPE_OBJECT:
-			_class = script_or_instace
 	# Creating an class object
 	elif script_or_instace is Script:
 		_class = script_or_instace.new() as Object

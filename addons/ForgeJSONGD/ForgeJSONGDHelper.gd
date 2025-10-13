@@ -37,13 +37,13 @@ static func _compare_dictionaries(a: Dictionary, b: Dictionary) -> Dictionary:
 			diff.set(key, {"old": a.get(key), "new": null})
 		elif not key_in_a and key_in_b:
 			# Key was added in 'b'.
-			diff.set(key,{"old": null, "new": b.get(key)})
+			diff.set(key, {"old": null, "new": b.get(key)})
 		else:
 			# Key exists in both, so we recurse to compare their values.
 			var result: Dictionary = compare_recursive(a.get(key), b.get(key))
 			if not result.is_empty():
 				# If the recursive comparison found a difference, add it to our diff report.
-				diff.set(key,result)
+				diff.set(key, result)
 	return diff
 
 
@@ -84,11 +84,11 @@ static func _process_dictionary(base_dict: Dictionary, ref_dict: Dictionary, op_
 				if result == null and (op_type == Operation.Remove or op_type == Operation.RemoveValue):
 					base_dict.erase(key)
 				else:
-					base_dict.set(key,result)
+					base_dict.set(key, result)
 					
 			# If the key doesn't exist in base, add it (for relevant operations).
 			elif op_type == Operation.Add or op_type == Operation.AddDiffer or op_type == Operation.Replace:
-				base_dict.set(key,ref_value)
+				base_dict.set(key, ref_value)
 				
 	return base_dict
 

@@ -20,12 +20,8 @@ static func _check_cast_class(gdscript_or_instace: Variant) -> bool:
 	return true
 
 ## Checks if a property should be included during serialization or deserialization. if script_type is not gdscript , then it is called from other languages
-static func _check_valid_property(property: Variant, script_type : Variant) -> bool:
-	return ((property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and
-	 (!only_exported_values or property.usage & PROPERTY_USAGE_STORAGE))
-	 or 
-	 (script_type != GDScript and 
-	 (property.usage == PROPERTY_USAGE_STORAGE or property.usage == PROPERTY_USAGE_NONE)))
+static func _check_valid_property(property: Variant) -> bool:
+	return property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and (!only_exported_values or property.usage & PROPERTY_USAGE_STORAGE)
 
 ## Helper function to find a GDScript by its class name.
 static func _get_gdscript(hint_class: String) -> GDScript:

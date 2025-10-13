@@ -33,12 +33,9 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 	# Store the script name for reference during deserialization if inheritance exists
 	if specify_class:
 		dictionary.set(SCRIPT_INHERITANCE, _class.get_script().get_global_name())
-	var script_language : Variant = _class.get_script()
+	var script_language: Variant = _class.get_script()
 	var properties: Array = []
-	if (script_language!=GDScript):
-		properties = script_language.get_script_property_list()
-	else:
-		properties = _class.get_property_list()
+	properties = _class.get_property_list()
 
 	# Iterate through each property of the class
 	for property: Dictionary in properties:
@@ -50,7 +47,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 			continue
 		var property_value: Variant = _class.get(property_name)
 		# Only serialize properties that are exported or marked for storage
-		if not property_name.is_empty() and _check_valid_property(property,script_language):
+		if not property_name.is_empty() and _check_valid_property(property):
 			if property_value is Array:
 				# Recursively convert arrays to JSON
 				dictionary.set(property_name, convert_array_to_json(property_value))
@@ -140,12 +137,12 @@ static func json_file_to_dict(file_path: String, security_key: String = "") -> D
 
 ## Converts a JSON dictionary into a Godot class instance.
 ## This is the core deserialization function.
-static func json_to_class(gdscript_or_instace: Variant, json: Dictionary) -> Object:
+static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Object:
 	# Create an instance of the target class
 	var _class: Variant = null
 	var properties: Array = []
 	## Passing null as a casted class
-	if gdscript_or_instace == null:
+	if script_or_instace == null:
 		var script_name: String = json.get(SCRIPT_INHERITANCE, null)
 		# Looking for the script
 		if script_name != null:
@@ -153,15 +150,17 @@ static func json_to_class(gdscript_or_instace: Variant, json: Dictionary) -> Obj
 			if script_type != null:
 				_class = script_type.new() as Object
 		# creating an empty object
-		elif typeof(gdscript_or_instace) == TYPE_OBJECT :
-			_class = gdscript_or_instace
+		elif typeof(script_or_instace) == TYPE_OBJECT:
+			_class = script_or_instace
 	# Creating an class object
-	elif gdscript_or_instace is GDScript:
-		_class = gdscript_or_instace.new() as Object
-	else:
-		_class = gdscript_or_instace
-		properties = gdscript_or_instace.get_script().get_script_property_list()
+	elif script_or_instace is GDScript or script_or_instace is Script:
+		_class = script_or_instace.new() as Object
+	elif script_or_instace is Object:
+		_class = script_or_instace
+		properties = script_or_instace.get_script().get_script_property_list()
 	if properties.is_empty():
+		if _class == null:
+			return Object.new()
 		properties = _class.get_property_list()
 	# Iterate through each key-value pair in the JSON dictionary
 	for key: String in json.keys():
@@ -184,7 +183,7 @@ static func json_to_class(gdscript_or_instace: Variant, json: Dictionary) -> Obj
 			var property_value: Variant = _class.get(property_name)
 			
 			# If the property name matches the JSON key and is a script variable:
-			if property_name == key and _check_valid_property(property,script_language):
+			if property_name == key and _check_valid_property(property):
 				# Case 1: Property is an Object (not an array)
 				if not property_value is Array and property_type == TYPE_OBJECT:
 					var inner_class_path: String = ""

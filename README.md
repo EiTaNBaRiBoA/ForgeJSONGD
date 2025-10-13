@@ -208,8 +208,8 @@ public partial class TestCSharp : Node
 
 		// --- LOADING ---
 		// 1. Call json_file_to_class to load and deserialize the data
-		//    The first argument is a new instance of the target class to provide type information.
-		var loadedData = forgeJsonScript.Call("json_file_to_class", new Data(), SavePath).As<Data>();
+		//    The first argument is a script or instance of the target class to provide type information.
+		var loadedData = forgeJsonScript.Call("json_file_to_class", dataToSave.GetScript(), SavePath).As<Data>();
 
 		if (loadedData != null)
 		{
@@ -305,6 +305,6 @@ print(remove_value_result) # Output: {"a": 1, "b": 2}
 ## Important Notes
 
   * **Supported Properties:**
-      * **GDScript:** By default, all script variables are serialized. To serialize **only** properties marked with `@export`, set `ForgeJSONGD.only_exported_values = true`.
-      * **C\#:** Only properties marked with the `[Export]` attribute will be serialized, regardless of the `only_exported_values` setting.
+	  * **GDScript:** By default, all script variables are serialized. To serialize **only** properties marked with `@export`, set `ForgeJSONGD.only_exported_values = true`.
+	  * **C\#:** Only properties marked with the `[Export]` attribute will be serialized, regardless of the `only_exported_values` setting.
   * **Error Handling:** Implement robust error handling in your project to catch potential issues like file loading failures or JSON parsing errors.

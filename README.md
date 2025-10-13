@@ -168,7 +168,7 @@ public partial class Data : GodotObject
 
 ### 2\. Call ForgeJSONGD from C\#
 
-Next, in another C\# script, you can load the `JsonForgeGD.gd` script and call its methods.
+Next, in another C\# script, you can load the `ForgeJSONGD.gd` script and call its methods.
 
 **TestCSharp.cs**
 
@@ -178,7 +178,7 @@ using Godot;
 public partial class TestCSharp : Node
 {
 	private const string SavePath = "user://csharp.json";
-	private const string ForgeJSONGDPath = "res://addons/ForgeJSONGD/JsonForgeGD.gd";
+	private const string ForgeJSONGDPath = "res://addons/ForgeJSONGD/ForgeJSONGD.gd";
 
 	public override void _Ready()
 	{

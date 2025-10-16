@@ -78,7 +78,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 					var enum_params: String = property.get("hint_string")
 					for enum_value: String in enum_params.split(","):
 						if enum_value.contains(":"):
-							if property_value == str_to_var(enum_value.split(":")[1]):
+							if property_value == (enum_value.split(":")[1]).to_int():
 								dictionary.set(property_name, enum_value.split(":")[0])
 						else:
 							dictionary.set(property_name, enum_value)

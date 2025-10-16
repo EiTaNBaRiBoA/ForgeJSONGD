@@ -308,3 +308,4 @@ print(remove_value_result) # Output: {"a": 1, "b": 2}
 	  * **GDScript:** By default, all script variables are serialized. To serialize **only** properties marked with `@export`, set `ForgeJSONGD.only_exported_values = true`.
 	  * **C\#:** Only properties marked with the `[Export]` attribute will be serialized, regardless of the `only_exported_values` setting.
   * **Error Handling:** Implement robust error handling in your project to catch potential issues like file loading failures or JSON parsing errors.
+  * **Security Handling:**  To prevent security vulnerabilities from Godot's str_to_var function, it's best to encrypt your JSON data.

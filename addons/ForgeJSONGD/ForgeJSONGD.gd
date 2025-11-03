@@ -196,7 +196,6 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 						if value is String and value.is_absolute_path():
 							_class.set(property_name, ResourceLoader.load(_get_main_tres_path(value)))
 						else:
-							print(value)
 							# Recursively deserialize nested objects
 							_class.set(property_name, json_to_class(script_type, value))
 							

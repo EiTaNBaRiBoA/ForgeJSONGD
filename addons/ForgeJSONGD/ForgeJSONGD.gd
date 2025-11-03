@@ -77,6 +77,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 				if property_type == TYPE_INT and property.get("hint") == PROPERTY_HINT_ENUM:
 					var enum_params: String = property.get("hint_string")
 					for enum_value: String in enum_params.split(","):
+						enum_value = enum_value.replace(" ", "_")
 						if enum_value.contains(":"):
 							if property_value == (enum_value.split(":")[1]).to_int():
 								dictionary.set(property_name, enum_value.split(":")[0])
@@ -156,7 +157,6 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 	# Iterate through each key-value pair in the JSON dictionary
 	for key: String in json.keys():
 		var value: Variant = json.get(key)
-		
 		# Special handling for Vector types (stored as strings in JSON)
 		if type_string(typeof(value)) == "String" and value.begins_with("Vector"):
 			value = str_to_var(value)
@@ -196,6 +196,7 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 						if value is String and value.is_absolute_path():
 							_class.set(property_name, ResourceLoader.load(_get_main_tres_path(value)))
 						else:
+							print(value)
 							# Recursively deserialize nested objects
 							_class.set(property_name, json_to_class(script_type, value))
 							
@@ -221,11 +222,12 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 						var enum_strs: Array = property.hint_string.split(",")
 						var enum_value: int = 0
 						for enum_str: String in enum_strs:
-							if enum_str.contains(":"):
+							if enum_str.contains(":"):								
 								var enum_keys: Array = enum_str.split(":")
 								for i: int in enum_keys.size():
-									if enum_keys[i].to_lower() == value.to_lower():
+									if enum_keys[i].to_lower() == value.to_lower().replace("_", " "):
 										enum_value = int(enum_keys[i + 1])
+										break
 						_class.set(property_name, int(enum_value))
 					elif property_type == TYPE_INT:
 						_class.set(property_name, int(value))

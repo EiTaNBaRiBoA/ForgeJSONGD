@@ -21,7 +21,7 @@ Simplify your Godot save/load systems with this GDScript singleton. Effortlessly
   * **Automatic Type Recognition:** Intelligently manages various data types, including:
 	  * Vectors (`Vector2`, `Vector3`, etc.)
 	  * Colors
-	  * Enums
+	  * Enums (`@export` required.)
 	  * Arrays (including typed arrays)
 	  * Dictionaries (including typed dictionaries)
 	  * Custom classes

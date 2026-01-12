@@ -141,6 +141,9 @@ static func _convert_variant(json_variant: Variant, type: Variant = null) -> Var
 		# Recursively call the array converter for nested arrays.
 		return _convert_json_to_array(processed_variant)
 	elif processed_variant is String and not processed_variant.is_empty():
+		# If the variable we are filling is explicitly typed as a String
+		if type != null and type is int and type == TYPE_STRING:
+			return processed_variant
 		# Try to convert string to a built-in Godot type (e.g., Vector2).
 		if type != null and type is int and type == TYPE_COLOR:
 			return Color(processed_variant)

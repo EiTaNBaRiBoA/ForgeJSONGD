@@ -67,7 +67,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 				else:
 					dictionary.set(property_name, class_to_json(property_value, property.get("class_name") != property_value.get_script().get_global_name()))
 			# Special handling for Vector types (store as strings)
-			elif type_string(typeof(property_value)).begins_with("Vector"):
+			elif type_string(typeof(property_value)).begins_with(VECTOR_TYPE_PREFIX):
 				dictionary[property_name] = var_to_str(property_value)
 			elif property_type == TYPE_COLOR:
 				# Store Color as a hex string

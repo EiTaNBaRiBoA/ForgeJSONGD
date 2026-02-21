@@ -25,7 +25,7 @@ static func compare_recursive(a: Variant, b: Variant) -> Dictionary:
 static func _compare_dictionaries(a: Dictionary, b: Dictionary) -> Dictionary:
 	var diff: Dictionary = {}
 	var all_keys: Array = a.keys()
-	for key in b.keys():
+	for key in b:
 		if not all_keys.has(key):
 			all_keys.append(key)
 	for key in all_keys:

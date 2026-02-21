@@ -103,12 +103,18 @@ static func _serialize_variant(variant_value: Variant, is_parent_typed: bool = f
 
 ## Helper function to recursively convert a JSON dictionary into a target dictionary.
 static func _convert_json_to_dictionary(property_dict: Dictionary, json_dict: Dictionary) -> void:
-	var key_type_script: Script = property_dict.get_typed_key_script()
-	var value_type_script: Script = property_dict.get_typed_value_script()
+	var key_type: Variant = property_dict.get_typed_key_script()
+	if key_type == null:
+		key_type = property_dict.get_typed_key_builtin()
+
+	var value_type: Variant = property_dict.get_typed_value_script()
+	if value_type == null:
+		value_type = property_dict.get_typed_value_builtin()
+
 	for json_key: Variant in json_dict:
 		var json_value: Variant = json_dict.get(json_key)
-		var converted_key: Variant = _convert_variant(json_key, key_type_script)
-		var converted_value: Variant = _convert_variant(json_value, value_type_script)
+		var converted_key: Variant = _convert_variant(json_key, key_type)
+		var converted_value: Variant = _convert_variant(json_value, value_type)
 		property_dict.set(converted_key, converted_value)
 
 ## Helper function to recursively convert a JSON array to a Godot array.

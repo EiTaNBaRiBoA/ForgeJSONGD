@@ -2,7 +2,7 @@
 
 const SCRIPT_INHERITANCE = "script_inheritance"
 
-## If ture only exported values will be serialized or deserialized.
+## If true only exported values will be serialized or deserialized.
 static var only_exported_values: bool = false
 
 #region Checks and Gets

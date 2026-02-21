@@ -66,7 +66,7 @@ static func convert_array_to_json(array: Array) -> Array:
 ## Helper function to recursively convert Godot dictionaries to JSON dictionaries.
 static func convert_dictionary_to_json(dictionary: Dictionary) -> Dictionary:
 	var json_dictionary: Dictionary = {}
-	for key: Variant in dictionary.keys():
+	for key: Variant in dictionary:
 		var parsed_key: Variant = _serialize_variant(key, dictionary.is_typed())
 		var parsed_value: Variant = _serialize_variant(dictionary.get(key), dictionary.is_typed())
 		if typeof(parsed_value) == TYPE_INT: # casting to float due to json parse in godot will always parse int and enum as float

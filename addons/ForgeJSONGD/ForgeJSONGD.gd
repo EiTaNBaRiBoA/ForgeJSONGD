@@ -155,7 +155,7 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 			return Object.new()
 		properties = _class.get_property_list()
 	# Iterate through each key-value pair in the JSON dictionary
-	for key: String in json.keys():
+	for key: String in json:
 		var value: Variant = json.get(key)
 		# Special handling for Vector types (stored as strings in JSON)
 		if type_string(typeof(value)) == "String" and value.begins_with("Vector"):

@@ -50,6 +50,38 @@ static func _get_dict_from_type(json: Variant) -> Dictionary:
 			dict = result
 	return dict
 
+
+## Checks if a string is safe to be processed by str_to_var.
+static func _is_safe_type(p_str: String) -> bool:
+	if p_str.is_empty():
+		return false
+
+	var safe_prefixes = [
+		"Vector2", "Vector2i", "Vector3", "Vector3i", "Vector4", "Vector4i",
+		"Rect2", "Rect2i", "Plane", "Quaternion", "AABB", "Basis",
+		"Transform2D", "Transform3D", "Projection", "Color"
+	]
+
+	var is_safe := false
+	for prefix in safe_prefixes:
+		if p_str.begins_with(prefix + "(") and p_str.ends_with(")"):
+			is_safe = true
+			break
+
+	if not is_safe:
+		# Also check for NodePath and StringName
+		if (p_str.begins_with("@\"") or p_str.begins_with("&\"")) and p_str.ends_with("\""):
+			is_safe = true
+
+	# If it looks like a safe type, ensure it doesn't contain any dangerous instantiations
+	if is_safe:
+		if "Object(" in p_str or "Callable(" in p_str or "Signal(" in p_str:
+			return false
+		return true
+
+	return false
+
+
 #endregion
 
 #region Converters
@@ -147,7 +179,10 @@ static func _convert_variant(json_variant: Variant, type: Variant = null) -> Var
 		# Try to convert string to a built-in Godot type (e.g., Vector2).
 		if type != null and type is int and type == TYPE_COLOR:
 			return Color(processed_variant)
-		var str_var: Variant = str_to_var(processed_variant)
+		var str_var: Variant = null
+		if _is_safe_type(processed_variant):
+			str_var = str_to_var(processed_variant)
+
 		if str_var == null:
 			var json := JSON.new()
 			# Handle cases where a value is a stringified JSON object/array.

@@ -158,7 +158,7 @@ static func json_to_class(script_or_instace: Variant, json: Dictionary) -> Objec
 	for key: String in json.keys():
 		var value: Variant = json.get(key)
 		# Special handling for Vector types (stored as strings in JSON)
-		if type_string(typeof(value)) == "String" and value.begins_with("Vector"):
+		if type_string(typeof(value)) == "String" and _is_safe_type(value):
 			value = str_to_var(value)
 			
 		# Find the matching property in the target class

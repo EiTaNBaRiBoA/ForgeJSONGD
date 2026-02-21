@@ -1,7 +1,11 @@
 @abstract class_name ForgeJSONGDBase
 
 const SCRIPT_INHERITANCE = "script_inheritance"
-const VECTOR_TYPE_PREFIX = "Vector"
+const SAFE_DESERIALIZATION_TYPES = [
+	"Vector2", "Vector2i", "Vector3", "Vector3i", "Vector4", "Vector4i",
+	"Rect2", "Rect2i", "Plane", "Quaternion", "AABB", "Basis",
+	"Transform2D", "Transform3D", "Projection", "Color"
+]
 
 ## If true only exported values will be serialized or deserialized.
 static var only_exported_values: bool = false
@@ -57,14 +61,8 @@ static func _is_safe_type(p_str: String) -> bool:
 	if p_str.is_empty():
 		return false
 
-	var safe_prefixes = [
-		"Vector2", "Vector2i", "Vector3", "Vector3i", "Vector4", "Vector4i",
-		"Rect2", "Rect2i", "Plane", "Quaternion", "AABB", "Basis",
-		"Transform2D", "Transform3D", "Projection", "Color"
-	]
-
 	var is_safe := false
-	for prefix in safe_prefixes:
+	for prefix in SAFE_DESERIALIZATION_TYPES:
 		if p_str.begins_with(prefix + "(") and p_str.ends_with(")"):
 			is_safe = true
 			break
@@ -118,7 +116,7 @@ static func _serialize_variant(variant_value: Variant, is_parent_typed: bool = f
 		return convert_array_to_json(variant_value)
 	elif variant_value is Dictionary:
 		return convert_dictionary_to_json(variant_value)
-	elif type_string(typeof(variant_value)).begins_with(VECTOR_TYPE_PREFIX):
+	elif type_string(typeof(variant_value)) in SAFE_DESERIALIZATION_TYPES and typeof(variant_value) != TYPE_COLOR:
 		return var_to_str(variant_value)
 	elif variant_value is int and not is_parent_typed:
 		# Godot's JSON.parse_string treats all numbers as floats.

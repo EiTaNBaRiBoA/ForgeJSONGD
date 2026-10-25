@@ -5,6 +5,12 @@
 ##   ForgeJSONGD.only_exported_values - serialize only @export variables when true.
 ## Types:
 ##   ForgeJSONGD.Operation - operations accepted by json_operation().
+##
+## Optional methods a class can define to customize its own JSON (all start with _forge_):
+##   func _forge_excluded_properties() -> Array   - names of variables to skip when saving and loading.
+##   func _forge_constructor_args() -> Array      - arguments for _init, stored and passed again on load.
+##   func _forge_serialize() -> Dictionary        - replaces the automatic serialization of the class.
+##   static func _forge_deserialize(json: Dictionary) -> Object - builds the instance from that dictionary.
 @abstract class_name ForgeJSONGD extends ForgeJSONGDBase
 
 
@@ -18,7 +24,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 
 ## Converts a class instance into a JSON string.
 static func class_to_json_string(_class: Object, specify_class: bool = false) -> String:
-	return JSON.stringify(class_to_json(_class, specify_class))
+	return JSON.stringify(class_to_json(_class, specify_class), "", true, true) # full_precision: floats keep every digit
 
 
 ## Stores a JSON dictionary to a file, encrypted when a security_key is given. Returns false on failure.
@@ -90,6 +96,30 @@ static func json_operation(base_json: Variant, ref_json: Variant, operation_type
 		if operation_type == Operation.Remove or operation_type == Operation.RemoveValue:
 			return {}
 	return ForgeJSONGDHelper.apply_operation_recursively(base_dict, ref_dict, operation_type)
+
+#endregion
+
+
+#region Script registry (optional safety)
+## By default any script can be created from the script name/path stored in a JSON file.
+## Once at least one script is registered, only registered scripts are created from JSON data
+## (scripts you pass yourself, like json_to_class(PlayerData, json), are always allowed).
+
+## Allows a script to be created from JSON data. Register every class that can appear, including child classes.
+static func register_script(script: Script) -> void:
+	if not script in _registered_scripts:
+		_registered_scripts.append(script)
+
+
+## Allows several scripts to be created from JSON data. See register_script().
+static func register_scripts(scripts: Array[Script]) -> void:
+	for script: Script in scripts:
+		register_script(script)
+
+
+## Removes every registered script, so any script is allowed again.
+static func clear_registered_scripts() -> void:
+	_registered_scripts.clear()
 
 #endregion
 

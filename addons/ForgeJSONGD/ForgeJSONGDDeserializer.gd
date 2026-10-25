@@ -10,22 +10,29 @@ static func json_to_class(script_or_instance: Variant, json: Dictionary) -> Obje
 	if script_or_instance == null:
 		var script_name: Variant = json.get(SCRIPT_INHERITANCE, null)
 		if script_name != null:
-			var script_type: Script = _get_gdscript(script_name)
+			var script_type: Script = _get_json_script(script_name)
 			if script_type != null:
-				target = script_type.new() as Object
+				var created: Array = _create_from_script(script_type, json)
+				if created[1]:
+					return created[0]
+				target = created[0]
 	elif script_or_instance is Script:
-		target = script_or_instance.new() as Object
+		var created: Array = _create_from_script(script_or_instance, json)
+		if created[1]:
+			return created[0]
+		target = created[0]
 	elif script_or_instance is Object:
 		target = script_or_instance
 	if target == null:
 		return Object.new()
-	var properties: Array = target.get_property_list()
 
 	# Index the settable properties by name so each JSON key is a direct lookup.
+	var excluded: Array = _get_excluded_properties(target)
 	var settable: Dictionary = {}
-	for property: Dictionary in properties:
-		if property.get("name") != "script" and _check_valid_property(property):
-			settable[property.get("name")] = property
+	for property: Dictionary in target.get_property_list():
+		var property_name: String = property.get("name")
+		if property_name != "script" and not property_name in excluded and _check_valid_property(property):
+			settable[property_name] = property
 
 	for key: String in json:
 		if not settable.has(key):
@@ -40,6 +47,24 @@ static func json_to_class(script_or_instance: Variant, json: Dictionary) -> Obje
 
 #region Internals
 
+## Creates the object for a script. The second item is true when the class built itself from the JSON
+## with _forge_deserialize: a static method (GDScript) or, for C#, a method of the new instance.
+static func _create_from_script(script: Script, json: Dictionary) -> Array:
+	if script.has_method("_forge_deserialize"):
+		return [script._forge_deserialize(json), true]
+	var instance: Object = _create_instance(script, json)
+	if instance != null and instance.has_method("_forge_deserialize"):
+		return [instance._forge_deserialize(json), true]
+	return [instance, false]
+
+
+## Creates an instance of the script, passing the constructor arguments stored in the JSON (if any).
+static func _create_instance(script: Script, json: Dictionary) -> Object:
+	if json.has(CONSTRUCTOR_ARGS) and json[CONSTRUCTOR_ARGS] is Array:
+		return script.new.callv(_convert_json_to_array(json[CONSTRUCTOR_ARGS])) as Object
+	return script.new() as Object
+
+
 ## Assigns one JSON value to a property, depending on the property's type.
 static func _assign_property(target: Object, property: Dictionary, value: Variant) -> void:
 	var property_name: String = property.get("name")
@@ -53,8 +78,10 @@ static func _assign_property(target: Object, property: Dictionary, value: Varian
 		if current.is_typed() and current.get_typed_script():
 			element_type = load(current.get_typed_script().get_path())
 		current.assign(_convert_json_to_array(value, element_type))
+		target.set(property_name, current) # C# arrays are copied when read, so set the filled array back
 	elif current is Dictionary:
 		_convert_json_to_dictionary(current, value)
+		target.set(property_name, current)
 	else:
 		_assign_simple(target, property, value)
 
@@ -71,20 +98,27 @@ static func _assign_object(target: Object, property: Dictionary, current: Object
 		target.set(property_name, json_to_class(load(inner_class_path), value))
 	elif value:
 		if value is String and value.is_absolute_path():
-			target.set(property_name, ResourceLoader.load(_get_main_tres_path(value)))
+			target.set(property_name, _load_resource(value))
 			return
 		var script_type: Script = null
 		if value is Dictionary and value.has(SCRIPT_INHERITANCE):
-			script_type = _get_gdscript(value.get(SCRIPT_INHERITANCE))
-		else:
+			script_type = _get_json_script(value.get(SCRIPT_INHERITANCE))
+		if script_type == null:
+			# No script in the JSON, or an unknown/unregistered one: use the type the variable is declared with.
 			script_type = _get_gdscript(property.get("class_name"))
+		if script_type == null:
+			return
 		target.set(property_name, json_to_class(script_type, value))
 
 
-## Assigns a Color, enum, int or other basic property.
+## Assigns a Variant, Color, enum, int or other basic property.
 static func _assign_simple(target: Object, property: Dictionary, value: Variant) -> void:
 	var property_name: String = property.get("name")
 	var property_type: Variant = property.get("type")
+	if property_type == TYPE_NIL:
+		# Variant property: nested objects and tagged built-in types are restored from the value itself.
+		target.set(property_name, _convert_plain_value(value))
+		return
 	if property_type == TYPE_COLOR:
 		value = Color(value)
 	if property_type == TYPE_INT and property.get("hint") == PROPERTY_HINT_ENUM:
@@ -131,18 +165,33 @@ static func _convert_json_to_array(json_array: Array, type: Variant = null) -> A
 	return godot_array
 
 
+## Loads a resource named by a path in the JSON. Returns null if it uses a script that is not registered.
+static func _load_resource(path: String) -> Resource:
+	var resource: Resource = ResourceLoader.load(_get_main_tres_path(path))
+	if resource != null and resource.get_script() != null and not _is_script_allowed(resource.get_script()):
+		push_warning("ForgeJSONGD: resource '%s' uses a script that is not registered, ignoring it." % path)
+		return null
+	return resource
+
+
 ## Converts a single Variant from JSON into its target Godot type.
 static func _convert_variant(json_variant: Variant, type: Variant = null) -> Variant:
+	# A resource stored by its path, in a container declared with an object type (Array[Texture2D]...).
+	if json_variant is String and json_variant.is_absolute_path() and (type is Script or (type is int and type == TYPE_OBJECT)):
+		return _load_resource(json_variant)
 	if json_variant is Dictionary or type is Object:
 		var script: Script = null
 		if SCRIPT_INHERITANCE in json_variant:
 			# Prioritize the script embedded in the JSON data.
-			script = _get_gdscript(json_variant.get(SCRIPT_INHERITANCE))
+			script = _get_json_script(json_variant.get(SCRIPT_INHERITANCE))
+			if script == null and type is Script:
+				# Unknown or unregistered script: use the type the container is declared with.
+				script = load(type.get_path())
 		elif type is Script:
 			# Fall back to the type hint from the parent array/dictionary.
 			script = load(type.get_path())
 		if script == null:
-			return json_variant
+			return _convert_plain_value(json_variant) if json_variant is Dictionary else json_variant
 		if json_variant is String:
 			return json_to_class(script, JSON.parse_string(json_variant))
 		return json_to_class(script, json_variant)
@@ -154,12 +203,35 @@ static func _convert_variant(json_variant: Variant, type: Variant = null) -> Var
 	return json_variant
 
 
+## Restores what a value says about itself, without a type hint: objects stored with their script
+## and built-in types stored as text (Rect2, Transform3D, Packed arrays...). Other values are kept as they are.
+static func _convert_plain_value(value: Variant) -> Variant:
+	if value is Dictionary:
+		if value.size() == 1 and value.get(RESOURCE_PATH) is String:
+			return _load_resource(value[RESOURCE_PATH])
+		if value.has(SCRIPT_INHERITANCE):
+			var script: Script = _get_json_script(value.get(SCRIPT_INHERITANCE))
+			if script != null:
+				return json_to_class(script, value)
+		var result: Dictionary = {}
+		for key: Variant in value:
+			result[key] = _convert_plain_value(value[key])
+		return result
+	if value is Array:
+		return value.map(_convert_plain_value)
+	if value is String and _is_safe_type(value):
+		var parsed: Variant = str_to_var(value)
+		if parsed != null:
+			return parsed
+	return value
+
+
 ## Converts a string into a built-in type (Vector2, Color...) or a parsed JSON structure when possible.
 static func _convert_string(text: String, type: Variant) -> Variant:
 	if type is int:
 		if type == TYPE_STRING:
 			return text
-		if type == TYPE_COLOR:
+		if type == TYPE_COLOR and not _is_safe_type(text):
 			return Color(text)
 	if _is_safe_type(text):
 		var parsed: Variant = str_to_var(text)

@@ -4,11 +4,28 @@
 ## Key written into a JSON dictionary to record which script an object was created from.
 const SCRIPT_INHERITANCE = "script_inheritance"
 
+## Key of the marker object that stores a resource file path in an untyped place (Variant, untyped Array/Dictionary).
+const RESOURCE_PATH = "forge_resource_path"
+
+## Key written into a JSON dictionary with the arguments for the script's _init (see _forge_constructor_args).
+const CONSTRUCTOR_ARGS = "script_constructor_args"
+
 ## String prefixes (before the opening bracket) of types that str_to_var may safely parse.
 const _SAFE_PREFIXES: Array[String] = [
 	"Vector2", "Vector2i", "Vector3", "Vector3i", "Vector4", "Vector4i",
 	"Rect2", "Rect2i", "Plane", "Quaternion", "AABB", "Basis",
-	"Transform2D", "Transform3D", "Projection", "Color"
+	"Transform2D", "Transform3D", "Projection", "Color",
+	"PackedByteArray", "PackedInt32Array", "PackedInt64Array", "PackedFloat32Array", "PackedFloat64Array",
+	"PackedStringArray", "PackedVector2Array", "PackedVector3Array", "PackedVector4Array", "PackedColorArray"
+]
+
+## Built-in types that JSON can't represent. In untyped slots (Variant, untyped Array/Dictionary) they are
+## stored as var_to_str text so their type survives. Vectors are handled separately.
+const _TAGGED_TYPES: Array[int] = [
+	TYPE_RECT2, TYPE_RECT2I, TYPE_AABB, TYPE_PLANE, TYPE_QUATERNION, TYPE_BASIS, TYPE_TRANSFORM2D,
+	TYPE_TRANSFORM3D, TYPE_PROJECTION, TYPE_COLOR, TYPE_PACKED_BYTE_ARRAY, TYPE_PACKED_INT32_ARRAY,
+	TYPE_PACKED_INT64_ARRAY, TYPE_PACKED_FLOAT32_ARRAY, TYPE_PACKED_FLOAT64_ARRAY, TYPE_PACKED_STRING_ARRAY,
+	TYPE_PACKED_VECTOR2_ARRAY, TYPE_PACKED_VECTOR3_ARRAY, TYPE_PACKED_VECTOR4_ARRAY, TYPE_PACKED_COLOR_ARRAY
 ]
 
 ## Defines the types of operations that can be performed on the data structures.
@@ -22,6 +39,9 @@ enum Operation {
 
 ## If true only exported values will be serialized or deserialized.
 static var only_exported_values: bool = false
+
+## Scripts allowed to be created from names/paths found in JSON. Empty means any script is allowed.
+static var _registered_scripts: Array[Script] = []
 
 
 #region Files
@@ -46,12 +66,12 @@ static func _write_json_file(file_path: String, data: Dictionary, security_key: 
 	if not file:
 		printerr("Error writing to a file")
 		return false
-	file.store_string(JSON.stringify(data, "\t"))
+	file.store_string(JSON.stringify(data, "\t", true, true)) # full_precision: floats keep every digit
 	file.close()
 	return true
 
 
-## Reads a JSON file into a Dictionary (or Array). Returns an empty Dictionary on any failure.
+## Reads a JSON file into a Dictionary. Returns an empty Dictionary on any failure.
 static func _read_json_file(file_path: String, security_key: String = "") -> Dictionary:
 	if not FileAccess.file_exists(file_path):
 		return {}
@@ -59,11 +79,18 @@ static func _read_json_file(file_path: String, security_key: String = "") -> Dic
 	if not file:
 		printerr("Error opening file: ", file_path)
 		return {}
-	var parsed_results: Variant = JSON.parse_string(file.get_as_text())
+	var text: String = file.get_as_text()
 	file.close()
-	if parsed_results is Dictionary or parsed_results is Array:
-		return parsed_results
-	return {}
+	if text.strip_edges().is_empty():
+		return {}
+	var parser: JSON = JSON.new()
+	if parser.parse(text) != OK:
+		printerr("ForgeJSONGD: invalid JSON in %s (line %d): %s" % [file_path, parser.get_error_line(), parser.get_error_message()])
+		return {}
+	if not parser.data is Dictionary:
+		printerr("ForgeJSONGD: %s does not contain a JSON object." % file_path)
+		return {}
+	return parser.data
 
 #endregion
 
@@ -78,6 +105,27 @@ static func _check_valid_property(property: Dictionary) -> bool:
 ## Returns true if the value's type is one of the Vector types.
 static func _is_vector(value: Variant) -> bool:
 	return type_string(typeof(value)).begins_with("Vector")
+
+
+## Returns the property names a class asks to skip with _forge_excluded_properties().
+static func _get_excluded_properties(object: Object) -> Array:
+	if object.has_method("_forge_excluded_properties"):
+		return object._forge_excluded_properties()
+	return []
+
+
+## Returns true if the script may be created from JSON data (always true when nothing is registered).
+static func _is_script_allowed(script: Script) -> bool:
+	return _registered_scripts.is_empty() or script in _registered_scripts
+
+
+## Finds a Script named inside JSON data. Returns null if it is unknown or not registered.
+static func _get_json_script(hint_class: String) -> Script:
+	var script: Script = _get_gdscript(hint_class)
+	if script != null and not _is_script_allowed(script):
+		push_warning("ForgeJSONGD: script '%s' is not registered, ignoring it." % hint_class)
+		return null
+	return script
 
 
 ## Finds a Script by its global class name or resource path.

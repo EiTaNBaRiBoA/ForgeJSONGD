@@ -96,4 +96,4 @@ Settings: `ForgeJSONGD.only_exported_values` (default `false`). Enum: `ForgeJSON
   * **What is saved:** GDScript saves every script variable by default; set `ForgeJSONGD.only_exported_values = true` to save only `@export` / `@export_storage` variables. C# saves only `[Export]` members.
   * **Errors:** saving returns `false` on failure; loading a missing file returns a new instance (or `{}` for a dictionary); invalid JSON text returns `null`. See [error handling](docs/GDScript-Tutorial.md#error-handling).
   * **Security:** encrypt files with a key to protect them from editing, and register the allowed scripts if files can come from other people. See [security](docs/GDScript-Tutorial.md#security).
-  * **Limits:** JSON numbers are doubles (whole numbers above 2^53 lose precision), and untyped containers read number-like text as numbers. See [limits](docs/GDScript-Tutorial.md#limits-and-things-to-know).
+  * **Exact data:** ints stay ints (also above 2^53), floats keep every digit, text stays text, and dictionary keys keep their type. See [how](docs/GDScript-Tutorial.md#numbers-text-and-keys-stay-exact).

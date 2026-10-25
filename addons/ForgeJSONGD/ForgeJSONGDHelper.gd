@@ -89,7 +89,7 @@ static func apply_operation_recursively(base_var: Variant, ref_var: Variant, op_
 ## Handles the recursive operation logic for Dictionaries.
 static func _process_dictionary(base_dict: Dictionary, ref_dict: Dictionary, op_type: Operation) -> Dictionary:
 	for key in ref_dict:
-		if key != SCRIPT_INHERITANCE:
+		if key != SCRIPT_INHERITANCE and key != SCRIPT_UID:
 			var ref_value = ref_dict[key]
 			
 			if base_dict.has(key):

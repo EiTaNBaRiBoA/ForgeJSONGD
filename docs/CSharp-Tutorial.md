@@ -240,7 +240,7 @@ All of these round-trip when exported with `[Export]` (every line below is cover
 
 | C# type | Notes |
 |---|---|
-| `string`, `bool`, `int`, `long`, `byte`, `float`, `double` | `long` is exact up to 2^53, see [limits](GDScript-Tutorial.md#limits-and-things-to-know) |
+| `string`, `bool`, `int`, `long`, `byte`, `float`, `double` | exact, including `long` values above 2^53 and every digit of a `double` |
 | C# `enum` | saved by name (`"Angry"`), also loads from the number |
 | `Vector2`, `Vector3`, `Color` | |
 | `Rect2`, `Aabb`, `Transform3D`, `Quaternion` | saved as text, restored with their type |
@@ -256,7 +256,7 @@ All of these round-trip when exported with `[Export]` (every line below is cover
 | Resources from files (`Texture2D`, ...) | saved as the file path; also inside untyped `Godot.Collections.Array` / `Dictionary` and `Variant` members |
 | `Variant` | keeps the type of the value it holds |
 
-Numbers inside **untyped** `Godot.Collections.Array` / `Dictionary` come back as `double` (JSON has one number type): use `Array<int>` or `Dictionary<string, int>` to get `int` back. The rest of the details are in [What is saved, and how](GDScript-Tutorial.md#what-is-saved-and-how).
+Numbers keep their type everywhere, also inside **untyped** `Godot.Collections.Array` / `Dictionary` and `Variant` members: an `int` stays an `int` and a `double` stays a `double` (see [Numbers, text and keys stay exact](GDScript-Tutorial.md#numbers-text-and-keys-stay-exact)).
 
 ---
 
@@ -475,7 +475,7 @@ These steps work without a `.sln` file: only the `.csproj` is needed.
 
 ## Limits and troubleshooting
 
-All the [limits of the GDScript guide](GDScript-Tutorial.md#limits-and-things-to-know) apply (numbers above 2^53, number-like text and integer keys in untyped containers...). C#-specific points:
+The [limits of the GDScript guide](GDScript-Tutorial.md#limits-and-things-to-know) apply. C#-specific points:
 
 | Problem | Cause and fix |
 |---|---|
@@ -483,6 +483,5 @@ All the [limits of the GDScript guide](GDScript-Tutorial.md#limits-and-things-to
 | A class is not found when loading (child comes back as parent) | The class has no `[GlobalClass]`, is not the class named like its file, or the project was built but not imported yet. See [Building and running](#building-and-running). |
 | `Failed loading resource: res://addons/ForgeJSONGD/ForgeJSONGD.gd` | The addon is somewhere else. Set `Forge.ScriptPath`. |
 | `Unable to cast object of type 'Godot.GodotObject' to type '...'` | Godot does not know your classes yet because the project was built but not imported. Run the import step, see [Building and running](#building-and-running). |
-| Values in an untyped `Godot.Collections.Array` are `double` | JSON has one number type. Use `Array<int>` or `Dictionary<string, int>`, which keep `int`. |
 | `_forge_...` method is ignored | The method name must be written exactly in snake_case as in the table, and must be public. |
 | `Forge.JsonToClass<T>` does not compile | `T` must derive from `GodotObject` and have a parameterless constructor. |

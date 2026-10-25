@@ -10,6 +10,20 @@ const RESOURCE_PATH = "forge_resource_path"
 ## Key written into a JSON dictionary with the arguments for the script's _init (see _forge_constructor_args).
 const CONSTRUCTOR_ARGS = "script_constructor_args"
 
+## Key written next to SCRIPT_INHERITANCE for scripts without a class_name: their uid, to find them again if the file moved.
+const SCRIPT_UID = "script_uid"
+
+## Marker objects for numbers in untyped places. JSON has one number type, so a whole number is read back as an int:
+## a whole-number float is stored as {FLOAT_MARKER: 5.0}, an int too large for a double as {INT_MARKER: "9007199254740993"}.
+const FLOAT_MARKER = "forge_float"
+const INT_MARKER = "forge_int"
+
+## Prefix for text that would otherwise be read as something else (a number as a dictionary key, "Vector2(1, 2)"...).
+const TEXT_PREFIX = "forge_text:"
+
+## Whole numbers up to this size (2^53) are exact in a JSON number.
+const MAX_SAFE_INT = 9007199254740992
+
 ## String prefixes (before the opening bracket) of types that str_to_var may safely parse.
 const _SAFE_PREFIXES: Array[String] = [
 	"Vector2", "Vector2i", "Vector3", "Vector3i", "Vector4", "Vector4i",
@@ -120,12 +134,56 @@ static func _is_script_allowed(script: Script) -> bool:
 
 
 ## Finds a Script named inside JSON data. Returns null if it is unknown or not registered.
-static func _get_json_script(hint_class: String) -> Script:
+## json is the dictionary holding the name: it can carry the script's uid, used when the file was moved.
+static func _get_json_script(hint_class: String, json: Dictionary = {}) -> Script:
 	var script: Script = _get_gdscript(hint_class)
+	if script == null and json.get(SCRIPT_UID) is String:
+		var uid: int = ResourceUID.text_to_id(json[SCRIPT_UID])
+		if ResourceUID.has_id(uid):
+			script = load(ResourceUID.get_id_path(uid)) as Script
 	if script != null and not _is_script_allowed(script):
 		push_warning("ForgeJSONGD: script '%s' is not registered, ignoring it." % hint_class)
 		return null
 	return script
+
+
+## Finds the script of a variable's declared class: a global class, or a class declared inside the owner's script.
+static func _get_declared_script(owner: Object, hint_class: String) -> Script:
+	var script: Script = _get_gdscript(hint_class)
+	if script != null:
+		return script
+	var owner_script: Script = owner.get_script() if owner != null else null
+	while owner_script != null:
+		var constants: Dictionary = owner_script.get_script_constant_map()
+		if constants.get(hint_class) is Script:
+			return constants[hint_class]
+		owner_script = owner_script.get_base_script()
+	return null
+
+
+## True for an int that a JSON number cannot hold exactly (2^53 and above, in either direction).
+static func _is_unsafe_int(number: int) -> bool:
+	return number >= MAX_SAFE_INT or number <= -MAX_SAFE_INT
+
+
+## True when a container is not typed, so nothing tells the type of its values when loading.
+static func _is_untyped(type: Variant) -> bool:
+	return type == null or (type is int and type == TYPE_NIL)
+
+
+## Text that would be read as something else gets TEXT_PREFIX: a Godot value ("Vector2(1, 2)"), text starting with the
+## prefix itself, and, for keys of untyped dictionaries, text that looks like a number or a bool.
+static func _escape_text(text: String, is_untyped_key: bool = false) -> String:
+	if text.begins_with(TEXT_PREFIX) or _is_safe_type(text):
+		return TEXT_PREFIX + text
+	if is_untyped_key and (text.is_valid_int() or text.is_valid_float() or text == "true" or text == "false"):
+		return TEXT_PREFIX + text
+	return text
+
+
+## Removes TEXT_PREFIX from text written by _escape_text.
+static func _unescape_text(text: String) -> String:
+	return text.substr(TEXT_PREFIX.length()) if text.begins_with(TEXT_PREFIX) else text
 
 
 ## Finds a Script by its global class name or resource path.

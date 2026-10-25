@@ -11,6 +11,7 @@ This guide covers everything ForgeJSONGD can do from GDScript. Using C#? Read th
 5. [Inheritance and polymorphism](#inheritance-and-polymorphism)
 6. [Customizing a class](#customizing-a-class)
 7. [Built-in types in `Variant` and untyped containers](#built-in-types-in-variant-and-untyped-containers)
+   * [Numbers, text and keys stay exact](#numbers-text-and-keys-stay-exact)
 8. [Enums](#enums)
 9. [Resources](#resources)
 10. [Security](#security)
@@ -118,7 +119,7 @@ Missing folders in the path are created for you (`user://saves/slot1/player.json
 | `null` | `null` | `null` |
 | `Variant` | depends on the value, with the type kept | see [below](#built-in-types-in-variant-and-untyped-containers) |
 
-Because JSON has only one number type, whole numbers in untyped places come back as floats. A typed `int` variable converts back to `int` when loading.
+Numbers keep their type: an `int` comes back as an `int` and a `float` as a `float`, in typed and untyped places alike. See [Numbers, text and keys stay exact](#numbers-text-and-keys-stay-exact).
 
 **What is not supported:** objects without a script (for example a plain `RefCounted.new()` stored in a variable of type `Object`) are saved as `null`, and `Callable` and `RID` values are not restored. Classes declared inside another script (`class Inner:`) cannot be found by name. See [Limits](#limits-and-things-to-know).
 
@@ -298,8 +299,8 @@ This also works with `json_string_to_class(null, text)`. If the JSON names no sc
 
 ### Rules to keep in mind
 
-* **Give child classes a `class_name`.** The name is how the class is found when loading. A script without `class_name` is found by its path (`res://...`), so do not move or rename that file after saving.
-* **Classes declared inside another script** (an inner `class`) have no name or path, so they cannot be found. Put them in their own file.
+* **Give child classes a `class_name`.** The name is how the class is found when loading. A script without `class_name` is found by its path (`res://...`), and ForgeJSONGD also stores its uid (`"script_uid"`), so it is still found if you move the file.
+* **Classes declared inside another script** (an inner `class`) have no name or path of their own, so they are found through the script that uses them: a variable, `Array[Inner]` or `Dictionary[String, Inner]` declared with an inner class loads, and a variable of the owner that holds a child inner class is saved as `"::Inner"` and loads too. An inner class cannot be found by name anywhere else (for example by `json_to_class(null, json)` or in an untyped container). Put classes you need there in their own file.
 * **A class that no longer exists** (you deleted or renamed it after saving) loads as the declared type of the variable, keeping the data that fits. In an untyped container or `Variant`, which has no declared type, the data stays a plain dictionary.
 * **Variables of the child** are only saved and loaded if they are script variables (`@export` only, if `only_exported_values` is on).
 
@@ -396,6 +397,37 @@ This covers vectors, `Color`, `Rect2/Rect2i`, `AABB`, `Plane`, `Quaternion`, `Ba
 Things that stay plain text: dictionary **keys**, `StringName` and `NodePath` values (so files stay readable).
 
 Typed containers (`Array[Rect2]`, `Dictionary[String, Transform3D]`) use the same text form. Typed `Color` containers keep the hex form.
+
+---
+
+## Numbers, text and keys stay exact
+
+JSON itself has a single number type and only text keys, and Godot's parser returns every number as a float. ForgeJSONGD works around this so that what you load is what you saved. The file stays readable: only the rare cases below get a marker.
+
+**Numbers.**
+
+* An `int` is written as a plain number and loaded as an `int`, a fractional `float` (`2.5`) as a `float`, in typed and untyped places.
+* In an untyped place (`Variant`, untyped `Array` / `Dictionary`) a **whole-number float** (`5.0`) would be indistinguishable from an `int`, so it is written as `{"forge_float": 5.0}`. In typed places (`float`, `Array[float]`) it is a plain number.
+* An `int` of 2^53 (9,007,199,254,740,992) or more cannot be a JSON number without losing digits. It is written as text: `"9007199254740993"` in a typed place and `{"forge_int": "9007199254740993"}` in an untyped place, and loads back exactly (also in `Array[int]`, `Dictionary[String, int]` and `PackedInt64Array`).
+* Floats are written with the shortest text that reads back as the exact same number (`0.1` stays `0.1`, `3.141592653589793` is kept whole). Very large and very small numbers use exponent notation (`1e+20`), which is valid JSON.
+
+**Text.** Text is never turned into something else. Text that would be mistaken for another value is written with the prefix `forge_text:` and loses it again on load: Godot values (`"Vector2(1, 2)"`, `"Rect2(1, 2, 3, 4)"`, `"PackedByteArray(1, 2)"`...) and text that already starts with the prefix. Number-like, bool-like and JSON-like text (`"123"`, `"true"`, `"[1, 2]"`) stays plain text, in String variables, `Array[String]`, untyped containers and `Variant`. Ordinary text is written as is.
+
+**Dictionary keys.** JSON keys are always text, so keys are written as their text and read back by type:
+
+| Key | Written as | Loads as |
+|---|---|---|
+| `1`, `-7`, `9007199254740993` | `"1"`, `"-7"`, `"9007199254740993"` | `int` |
+| `1.5` | `"1.5"` | `float` |
+| `true` | `"true"` | `bool` |
+| `"1"`, `"1.5"`, `"true"` (text) | `"forge_text:1"`, `"forge_text:1.5"`, `"forge_text:true"` | text |
+| `"plain"` | `"plain"` | text |
+| `Vector2(3, 4)` | `"Vector2(3, 4)"` | `Vector2` |
+| `"Vector2(1, 2)"` (text) | `"forge_text:Vector2(1, 2)"` | text |
+
+In a typed dictionary the key type is known (`Dictionary[int, String]`, `Dictionary[String, int]`), so keys load by that type.
+
+**Files written by older versions** still load. Whole numbers that older versions wrote as `5.0` in untyped places load as `int` now (they could not be told apart), and `Rect2`, `AABB`, `Plane`, `Quaternion`, `Basis`, `Transform2D/3D`, `Projection` and packed arrays that older versions wrote as display text (for example `"[P: (1.0, 2.0), S: (3.0, 4.0)]"`) are read back too, with the precision of that text (about 6 digits).
 
 ---
 
@@ -566,17 +598,13 @@ else:
 
 ## Limits and things to know
 
-* **Floats keep every digit.** They are written with the shortest text that reads back as the exact same number (`0.1` stays `0.1`, `3.141592653589793` is kept whole). Very large and very small numbers use exponent notation (`1e+20`), which is valid JSON.
-* **Numbers are doubles.** Whole numbers above 2^53 (9,007,199,254,740,992) lose precision, because JSON has no integer type. Use text for such values (for example IDs).
-* **Whole numbers come back as floats in untyped places.** In an untyped `Array`, `Dictionary` or `Variant`, `5` comes back as `5.0`. Typed variables (`int`, `Array[int]`, `Dictionary[String, int]`) convert back to `int`.
-* **Untyped containers read number-like and bool-like text as values.** The text `"123"` in an untyped array comes back as the number `123.0`, and `"true"` as `true`. Use a typed container (`Array[String]`) to keep such text exactly.
-* **Integer keys of untyped dictionaries become float keys.** `{1: "a"}` comes back as `{1.0: "a"}`, so `has(1)` is `false` and `has(1.0)` is `true`. `Dictionary[int, String]` keeps `int` keys.
+* **Inner classes are found through their owner.** See the [inheritance rules](#rules-to-keep-in-mind). They cannot be found by name outside the script that declares them.
 * **Objects as dictionary keys** (`Dictionary[ClassA, ClassB]`) work, but JSON keys must be text, so the key is saved as the JSON text of the object (`"{ \"classAProperty\": \"ClassAText\" }"`). It loads back as an object.
-* **One class per script, with a `class_name`.** Inner classes cannot be loaded by name. Renaming or moving a script file breaks files saved with its old name or path (it then loads as the declared type).
-* **Equal data, different formats.** Files written by this version store `Rect2`, `PackedByteArray` and similar types as text (`"Rect2(1, 2, 3, 4)"`). Files written by older versions still load, but a `Rect2` or packed array stored as display text by an older version (for example `"[P: (1.0, 2.0), S: (3.0, 4.0)]"`) was never readable and is not converted.
-* **Newer files in older addons.** Older versions of ForgeJSONGD read files from this version, and restore vectors, `Color`, `Rect2` and the other types they already knew. Packed arrays in untyped places stay as text there.
+* **Files from this version in older addons.** Older versions of ForgeJSONGD read files from this version, and restore vectors, `Color`, `Rect2` and the other types they already knew. Packed arrays in untyped places stay as text there, and the number markers (`forge_float`, `forge_int`) show up as small dictionaries.
+* **Objects without a script, `Callable` and `RID`** cannot be rebuilt (see [What is saved, and how](#what-is-saved-and-how)).
 * **Nodes.** A class that extends `Node` works like any other class (only its script variables are saved). Children and built-in properties (position, name, ...) are not saved: save the data you need in script variables.
 * **Global settings.** `only_exported_values` and the script registry are global: they apply to every call until you change them.
+* **A class whose `_init` needs arguments** needs `_forge_constructor_args` (see [Customizing a class](#customizing-a-class)).
 
 ---
 
@@ -586,9 +614,7 @@ else:
 |---|---|
 | A child class loads as its parent | The child has no `class_name` and was moved, or the script is not registered ([registry](#security)), or in C# the class cache is stale ([C# builds](CSharp-Tutorial.md#building-and-running)). |
 | A variable is not saved | It is a Godot property instead of a script variable, `only_exported_values` is `true` and it has no `@export`, the class excludes it with `_forge_excluded_properties`, or (C#) it has no `[Export]`. |
-| Text like `"123"` turned into a number | It was in an untyped container. Use `Array[String]` / `Dictionary[String, String]`. |
-| `has(1)` is `false` after loading a dictionary | Int keys of an untyped dictionary become floats. Use a typed `Dictionary[int, ...]`. |
-| A `Rect2`/`Transform3D` is back to its default | The file was written as display text by an older version, or the variable was declared with a different type than the file. |
+| A `Rect2`/`Transform3D` is back to its default | The variable was declared with a different type than the file holds, or the text in the file is not a form ForgeJSONGD knows. |
 | `json_file_to_dict` returns `{}` | The file is missing, not valid JSON, or the key is wrong or missing for an encrypted file. |
 | Loading an object whose `_init` needs arguments gives a plain `Object` and an error | Add `_forge_constructor_args`, or give the parameters default values. |
 | `check_equal_jsons` says different for data that looks the same | Array order differs, or a value differs in type (`"1"` text vs `1` number). Key order and `1` vs `1.0` never matter. |

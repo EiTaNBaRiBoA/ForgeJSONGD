@@ -5,20 +5,22 @@ This guide covers everything ForgeJSONGD can do from GDScript. Using C#? Read th
 ## Contents
 
 1. [Your first save and load](#your-first-save-and-load)
-2. [What is saved, and how](#what-is-saved-and-how)
-3. [Method reference](#method-reference)
-4. [Settings](#settings)
-5. [Inheritance and polymorphism](#inheritance-and-polymorphism)
-6. [Customizing a class](#customizing-a-class)
-7. [Built-in types in `Variant` and untyped containers](#built-in-types-in-variant-and-untyped-containers)
+2. [JSON for HTTP APIs](#json-for-http-apis)
+3. [What is saved, and how](#what-is-saved-and-how)
+4. [Method reference](#method-reference)
+5. [Settings](#settings)
+6. [Inheritance and polymorphism](#inheritance-and-polymorphism)
+7. [Customizing a class](#customizing-a-class)
+8. [Keeping saves working over time](#keeping-saves-working-over-time)
+9. [Built-in types in `Variant` and untyped containers](#built-in-types-in-variant-and-untyped-containers)
    * [Numbers, text and keys stay exact](#numbers-text-and-keys-stay-exact)
-8. [Enums](#enums)
-9. [Resources](#resources)
-10. [Security](#security)
-11. [Comparing and patching JSON](#comparing-and-patching-json)
-12. [Error handling](#error-handling)
-13. [Limits and things to know](#limits-and-things-to-know)
-14. [Troubleshooting](#troubleshooting)
+10. [Enums](#enums)
+11. [Resources](#resources)
+12. [Security](#security)
+13. [Comparing and patching JSON](#comparing-and-patching-json)
+14. [Error handling](#error-handling)
+15. [Limits and things to know](#limits-and-things-to-know)
+16. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -94,6 +96,97 @@ Missing folders in the path are created for you (`user://saves/slot1/player.json
 
 ---
 
+## JSON for HTTP APIs
+
+A class that you send to a web API, or receive from one (a DTO, a data transfer object), needs **standard JSON**: the API knows nothing about Godot. By default ForgeJSONGD writes a format made for game saves (a class name for child classes, markers that keep `5.0` apart from `5`, a prefix on text that looks like a Godot value...). To switch a class to standard JSON, add one method to it. Everything else is the same functions you already use:
+
+```gdscript
+# login_dto.gd
+class_name LoginDto
+
+var user_name: String = ""
+var password: String = ""
+var remember: bool = false
+var attempts: int = 0
+
+
+# This class talks to a web API: write and read it as standard JSON.
+func _forge_plain_json() -> bool:
+	return true
+
+
+# The API calls the field "userName".
+func _forge_json_keys() -> Dictionary:
+	return {"user_name": "userName"}
+```
+
+```gdscript
+var login := LoginDto.new()
+login.user_name = "ann"
+login.password = "pw"
+login.remember = true
+login.attempts = 2
+
+var body: String = ForgeJSONGD.class_to_json_string(login)
+print(body) # {"attempts":2,"password":"pw","remember":true,"userName":"ann"}
+```
+
+Sending it, and reading the answer into another class, with an `HTTPRequest` node (a real round trip like this is run by `Tests/http.tscn`):
+
+```gdscript
+$HTTPRequest.request("https://example.com/login", ["Content-Type: application/json"], HTTPClient.METHOD_POST, body)
+
+func _on_http_request_request_completed(result: int, code: int, headers: PackedStringArray, response: PackedByteArray) -> void:
+	var user: UserDto = ForgeJSONGD.json_string_to_class(UserDto, response.get_string_from_utf8())
+```
+
+The class decides, so there is nothing to remember at each call, and the same functions serve both uses: a class that returns `true` from `_forge_plain_json` is plain, anything else is the exact format used for save files.
+
+* **Everything inside a plain class is plain**: nested objects, arrays and dictionaries of objects, child classes, free-form `Dictionary` / `Variant` data.
+* **A plain class is plain wherever it appears**, also inside a class that is not plain (a save file that holds the last server answer, for example). The class that is not plain stays exact.
+* **The same data both ways:** make a small subclass that returns `false`: `class_name SavedUser` / `extends UserDto` / `func _forge_plain_json() -> bool: return false`.
+
+### What a plain class writes
+
+* **Only standard JSON.** No `script_inheritance`, `script_uid`, `script_constructor_args`, `forge_float`, `forge_int`, `forge_text:`, `forge_int:` or `forge_resource_path` is ever written (not even with `specify_class = true`), so a child class is written as plain data and the API gets exactly the fields you declared.
+* **Numbers are plain numbers**: `5` stays `5` and `2.0` stays `2.0`, also in free-form `Dictionary` / `Array` / `Variant` data. A large int is a plain JSON number with every digit.
+* **Text and dictionary keys are written as they are**, whatever they look like (`"123"`, `"true"`, `"Vector2(1, 2)"`). Number keys of a free-form dictionary are written as their text (`1` becomes `"1"`).
+* **Vectors are `{"x": 1.0, "y": 2.0}`** (`{"x", "y", "z"}`, `{"x", "y", "z", "w"}` for the larger ones), **`Color` is its hex text** (`"ff0000ff"`), **enums are their name** (`"Admin"`), `null` is `null`.
+* Types that have no standard JSON form (`Rect2`, `Transform3D`, packed arrays...) keep their [text form](#what-is-saved-and-how).
+* `_forge_excluded_properties`, `_forge_json_keys`, `_forge_extra_properties` and `_forge_serialize` apply. Keys are sorted, or in the order of the variables if `ForgeJSONGD.sort_keys` is `false`.
+
+### What a plain class accepts
+
+Everything a server may send is data, never instructions:
+
+* **A class name in the data is ignored.** `"script_inheritance"`, `"script_uid"` and `"script_constructor_args"` do nothing: the class is the one you declared (a variable declared `Address` is always an `Address`, a variable that already holds an object keeps that object's class). No script is created because a server asked for it.
+* **No file is loaded.** A path like `"res://icon.svg"` sent for a `Texture2D` variable is not loaded.
+* **Text is text.** `"Vector2(1, 2)"`, `"forge_text:abc"`, `"123"` or `"{\"a\": 1}"` arrive as that exact text, in String variables, `Array[String]` and in free-form data. Dictionary keys of free-form data stay text, as in JSON.
+* **Free-form data is kept as sent**, including keys that look like markers (`{"forge_float": 3}` is just a dictionary). A whole number (`5` or `5.0`) is read as an `int`, others as `float`: JSON parsed by Godot cannot tell `5` from `5.0`.
+* **Typed fields get their own type.** `{"id": 5.0}` fills an `int`, `{"score": 3}` fills a `float`, `{"zip": 54321}` fills a `String` (as `"54321"`), `{"position": {"x": 3, "y": 4}}` fills a `Vector2`, `"Admin"` or `5` fills an enum, and a large id sent as text (`"9007199254740993"`) fills an `int` exactly.
+* **Missing, null and unknown.** A field the server leaves out, or sends as `null`, keeps its default. A field your class does not have is ignored. Data of the wrong shape (text for an array, a number for an object) is skipped and the field keeps its default. An empty object (`{}`) creates the declared object with its defaults. A `null` or wrong element inside an `Array[Dto]` becomes `null`.
+* **Older names.** `_forge_renamed_properties` and a variable's own name are accepted besides its `_forge_json_keys` key (the key wins when both are present).
+
+One limit comes from Godot, not from ForgeJSONGD: **Godot's JSON parser reads a JSON number above 2^53 as a double**, so `{"id": 9007199254740993}` arrives as `9007199254740992`. When a server sends 64-bit ids, ask for them as text (`"id": "9007199254740993"`), which is exact. Sending is not affected: an `int` is always written with every digit.
+
+### Child classes
+
+A plain class written with a child class holds no class name, so the receiving side loads it as the class it declares:
+
+```gdscript
+# ApiZoo is a Zoo that returns true from _forge_plain_json
+var text := ForgeJSONGD.class_to_json_string(zoo)               # a Dog is written with its own variables, no "script_inheritance"
+var loaded: ApiZoo = ForgeJSONGD.json_string_to_class(ApiZoo, text) # loads as the declared Animal
+```
+
+If the receiver needs the real class, use a class that is not plain (it keeps the class name) or add a field of your own that says the kind.
+
+### Reading data you do not trust
+
+Always pass the class you expect: `json_to_class(UserDto, data)`. With `null` as the class (`json_to_class(null, data)`) the class is taken from the data itself, which is what you want for your own save files and never for data from outside. Even then, the [allow-list](#security) limits what can be created. Constructor arguments stored in the data are only used by a class that defines `_forge_constructor_args`.
+
+---
+
 ## What is saved, and how
 
 **Which variables:** by default every script variable of the class, exported or not. Set [`only_exported_values`](#settings) to save only `@export` and `@export_storage` variables. A class can also skip variables itself, see [Customizing a class](#customizing-a-class). Variables inherited from a parent *script* are included; built-in properties of Godot nodes (position, name...) are not, only script variables.
@@ -151,6 +244,7 @@ Convert a container of objects and values on its own, using the same rules as ab
 
 ```gdscript
 var json_array: Array = ForgeJSONGD.convert_array_to_json([dog, cat])
+var json_dictionary: Dictionary = ForgeJSONGD.convert_dictionary_to_json({"main": dog, "pet": cat})
 ```
 
 ### Loading
@@ -182,9 +276,13 @@ File to dictionary. Returns `{}` when the file is missing, is not valid JSON, or
 
 `check_equal_jsons`, `compare_jsons_diff` and `json_operation` are covered in [Comparing and patching JSON](#comparing-and-patching-json).
 
+### Plain JSON for web APIs
+
+There are no separate functions: a class that returns `true` from `_forge_plain_json` is written and read as standard JSON by the functions above. See [JSON for HTTP APIs](#json-for-http-apis).
+
 ### Script registry
 
-`register_script(script)`, `register_scripts(scripts)` and `clear_registered_scripts()` are covered in [Security](#security).
+`register_script(script)`, `register_scripts(scripts)` and `clear_registered_scripts()` are covered in [Security](#security). `register_script_alias(script, alias, save_as = true)` and `clear_script_aliases()` are covered in [Keeping saves working over time](#keeping-saves-working-over-time).
 
 ### Constants
 
@@ -205,6 +303,15 @@ ForgeJSONGD.only_exported_values = true # only @export and @export_storage varia
 * `true`: only variables with `@export` or `@export_storage` are saved and loaded. Plain `var` variables are skipped in both directions.
 
 The setting is global and stays set until you change it back. In C#, only `[Export]` members are ever saved, regardless of this setting.
+
+Two more settings control the text that is written (they apply to files and to JSON text):
+
+```gdscript
+ForgeJSONGD.json_indent = ""   # indentation of files written by store_json_file: "\t" (default), "  " for spaces, "" for compact files
+ForgeJSONGD.sort_keys = false  # true (default): keys in alphabetical order. false: keys in the order of the variables in the class
+```
+
+`json_indent` only applies to `store_json_file` (JSON text from `class_to_json_string` is always compact). Both are global settings and reading is not affected: any indentation and key order loads.
 
 ---
 
@@ -313,6 +420,11 @@ A class can define any of these optional methods. They all start with `_forge_`,
 | Method | What it does |
 |---|---|
 | `func _forge_excluded_properties() -> Array` | Names of variables to skip when saving **and** loading. |
+| `func _forge_extra_properties() -> Array` | Names of built-in properties (`position`, `rotation`...) to save and load too, besides the script variables. |
+| `func _forge_json_keys() -> Dictionary` | `{"variable_name": "jsonKey"}`: the key a variable uses in the JSON. For API field names. |
+| `func _forge_renamed_properties() -> Dictionary` | `{"old_name": "new_name"}`: old saves still load into a renamed variable. |
+| `func _forge_plain_json() -> bool` | Return `true` for a class that talks to a web API: it is written and read as [standard JSON](#json-for-http-apis). |
+| `func _forge_save_by_path() -> bool` | For `Resource` classes: a resource that comes from a file is saved as its path. |
 | `func _forge_constructor_args() -> Array` | Arguments for `_init`. They are saved, and passed to `_init` again on load. Needed when `_init` has required parameters. |
 | `func _forge_serialize() -> Dictionary` | Replaces the automatic saving of the class with your own dictionary. |
 | `static func _forge_deserialize(json: Dictionary) -> Object` | Builds the object from that dictionary. Use together with `_forge_serialize`. |
@@ -351,7 +463,36 @@ func _forge_constructor_args() -> Array:
 	return [damage, title]
 ```
 
-The arguments are saved under `"script_constructor_args"`. On load, ForgeJSONGD creates the object with those arguments, then loads the variables. Without this method, a class with required `_init` parameters cannot be created: Godot prints an error and you get a plain `Object` back.
+The arguments are saved under `"script_constructor_args"`. On load, ForgeJSONGD creates the object with those arguments, then loads the variables. Stored arguments are only passed to a class that defines `_forge_constructor_args` itself, so a file cannot choose the arguments of any other class. Without this method, a class with required `_init` parameters cannot be created: Godot prints an error and you get a plain `Object` back.
+
+### Saving built-in properties such as `position`
+
+By default only script variables are saved, so a `Node2D` loses its `position`. List the built-in properties to save too:
+
+```gdscript
+class_name SpriteState
+extends Node2D
+
+var health: int = 10
+
+
+# Besides the script variables, save where the node is.
+func _forge_extra_properties() -> Array:
+	return ["position", "rotation", "scale", "modulate"]
+```
+
+They are saved and loaded like script variables (vectors as text, `Color` as hex...). Properties that are not in the list stay untouched.
+
+### Other names in the JSON
+
+`_forge_json_keys` gives a variable another key in the JSON. Typically the field names of an API:
+
+```gdscript
+func _forge_json_keys() -> Dictionary:
+	return {"user_name": "userName", "big_id": "bigId"}
+```
+
+The key is written, and read back. The variable's own name is also accepted when loading (the key wins if both are in the JSON). It works in plain classes too. In C# use the member names: `{ "UserName", "userName" }`.
 
 ### Taking over saving and loading
 
@@ -377,6 +518,52 @@ static func _forge_deserialize(json: Dictionary) -> Object:
 * `_forge_serialize` returns the dictionary that is saved for the class. The values in it are converted by the normal rules. If the class is saved with `specify_class` (or in an untyped place), `"script_inheritance"` is added to it for you.
 * `_forge_deserialize` receives the dictionary exactly as it was loaded from JSON, and returns the object. The automatic loading of variables is skipped.
 * `_forge_deserialize` can also be a normal (non-static) method. A new instance is created first, then the method is called on it and its return value is used. C# classes must use this form, see the [C# Tutorial](CSharp-Tutorial.md#customizing-a-class-from-c).
+
+---
+
+## Keeping saves working over time
+
+Files outlive the code that wrote them. Three tools keep old saves loading after you rename or move things.
+
+### Renamed variables
+
+```gdscript
+class_name RenamedModel
+
+# Was called "name" and then "title" in older versions.
+var display_name: String = "default"
+var level: int = 1
+
+
+func _forge_renamed_properties() -> Dictionary:
+	return {"name": "display_name", "title": "display_name"}
+```
+
+Old files that hold `"name"` or `"title"` load into `display_name`. Saving always writes the current name, and when a file holds both an old and the current name, the current one wins.
+
+### Renamed or moved classes: script aliases
+
+A class is saved under its `class_name`, so renaming the class breaks files that name the old one. An alias is a stable name you choose and keep:
+
+```gdscript
+# Once, at startup:
+ForgeJSONGD.register_script_alias(Dog, "dog_v1")
+ForgeJSONGD.register_script_alias(Cat, "cat_v1")
+```
+
+From then on `Dog` is saved as `"script_inheritance": "dog_v1"` and loaded from it, whatever the class is called in the code. For a class you already renamed, add the **old name** as a load-only alias:
+
+```gdscript
+ForgeJSONGD.register_script_alias(Dog, "Hound", false) # old files that say "Hound" load as Dog, but "Hound" is never written
+
+ForgeJSONGD.clear_script_aliases() # removes all aliases again
+```
+
+Aliases are separate from the [allow-list](#security): registering an alias does not restrict anything, but with an allow-list active the script must still be registered.
+
+### Scripts without a class_name
+
+A script without `class_name` is saved by its path. ForgeJSONGD also stores its uid (`"script_uid"`), so the script is found again if you move the file in the editor. With an alias, only the alias is stored.
 
 ---
 
@@ -413,19 +600,18 @@ JSON itself has a single number type and only text keys, and Godot's parser retu
 
 **Text.** Text is never turned into something else. Text that would be mistaken for another value is written with the prefix `forge_text:` and loses it again on load: Godot values (`"Vector2(1, 2)"`, `"Rect2(1, 2, 3, 4)"`, `"PackedByteArray(1, 2)"`...) and text that already starts with the prefix. Number-like, bool-like and JSON-like text (`"123"`, `"true"`, `"[1, 2]"`) stays plain text, in String variables, `Array[String]`, untyped containers and `Variant`. Ordinary text is written as is.
 
-**Dictionary keys.** JSON keys are always text, so keys are written as their text and read back by type:
+**Dictionary keys.** JSON keys are always text. Text keys are written as they are, so an ordinary dictionary (including `{"123": ...}` or `{"true": ...}`) is never changed. In an **untyped** dictionary a key that is not text gets a tag that says its type, and text that could be mistaken for a tag or a Godot value is escaped:
 
 | Key | Written as | Loads as |
 |---|---|---|
-| `1`, `-7`, `9007199254740993` | `"1"`, `"-7"`, `"9007199254740993"` | `int` |
-| `1.5` | `"1.5"` | `float` |
-| `true` | `"true"` | `bool` |
-| `"1"`, `"1.5"`, `"true"` (text) | `"forge_text:1"`, `"forge_text:1.5"`, `"forge_text:true"` | text |
-| `"plain"` | `"plain"` | text |
+| `"plain"`, `"123"`, `"true"`, `"1.5"` (text) | the same text | text |
+| `1`, `-7`, `9007199254740993` | `"forge_int:1"`, `"forge_int:-7"`, `"forge_int:9007199254740993"` | `int` |
+| `1.5` | `"forge_float:1.5"` | `float` |
+| `true` | `"forge_bool:true"` | `bool` |
 | `Vector2(3, 4)` | `"Vector2(3, 4)"` | `Vector2` |
-| `"Vector2(1, 2)"` (text) | `"forge_text:Vector2(1, 2)"` | text |
+| `"Vector2(1, 2)"`, `"forge_int:5"` (text that looks like a Godot value or a tag) | `"forge_text:Vector2(1, 2)"`, `"forge_text:forge_int:5"` | text |
 
-In a typed dictionary the key type is known (`Dictionary[int, String]`, `Dictionary[String, int]`), so keys load by that type.
+In a typed dictionary the key type is known (`Dictionary[int, String]`, `Dictionary[String, int]`), so its keys are plain text and load by that type.
 
 **Files written by older versions** still load. Whole numbers that older versions wrote as `5.0` in untyped places load as `int` now (they could not be told apart), and `Rect2`, `AABB`, `Plane`, `Quaternion`, `Basis`, `Transform2D/3D`, `Projection` and packed arrays that older versions wrote as display text (for example `"[P: (1.0, 2.0), S: (3.0, 4.0)]"`) are read back too, with the precision of that text (about 6 digits).
 
@@ -452,6 +638,21 @@ enum Mood { CALM, HAPPY = 5, ANGRY = 9 }
 * A resource that is stored in a file other than `.tres` (a texture, for example) is saved as its **path**, and loaded again with `ResourceLoader`. This also works inside typed containers: `Array[Texture2D]` and `Dictionary[String, Texture2D]` are saved as paths and load the resources again.
 * A resource stored in a `.tres` file, or one that was never saved to disk, is saved **inline** as a JSON object of its variables, and rebuilt on load.
 * A `null` resource stays `null`.
+* A resource class can ask to be saved **as its path even from a `.tres` file**, so a save points at the item file instead of holding a copy, and every reference loads the same shared instance:
+
+```gdscript
+class_name ItemResource
+extends Resource
+
+@export var item_name: String = ""
+
+
+# A save should point at the item file, not hold a copy of it.
+func _forge_save_by_path() -> bool:
+	return true
+```
+
+A resource of such a class that comes from a file is saved as its path in variables and typed containers (`{"forge_resource_path": "<path>"}` in untyped places), and loaded again with `ResourceLoader`, so changes to the item file show in old saves. A resource that was never saved to a file is still saved inline. The [allow-list](#security) applies, and a plain class never loads files.
 * In an **untyped** place (a `Variant` variable, an untyped `Array` or `Dictionary`, nested containers), nothing tells the type when loading, so a resource from a file is saved as a small marker object holding the path, `{"forge_resource_path": "res://icon.svg"}`, and loaded again from it.
 
 You can also write a resource path in the JSON by hand: `{"texture": "res://icon.svg"}` loads the texture.
@@ -480,6 +681,8 @@ ForgeJSONGD.clear_registered_scripts() # every script is allowed again
 * A script in the JSON that is not registered is not created. It loads as the declared type of the variable instead (a `Cat` in an `Array[Animal]` becomes an `Animal` with the data that fits), and a warning is printed. In an untyped place it stays plain data.
 * A resource path in the JSON whose resource uses an unregistered script is not loaded. Resources without a script (textures, for example) still load.
 * The registry is global.
+
+**Data from outside.** Always pass the class you expect (`json_to_class(UserDto, data)`). With `null` as the class the data chooses the class. A class that returns `true` from [`_forge_plain_json`](#json-for-http-apis) never takes a class name, a file path or any other instruction from its data.
 
 **Text values.** When loading, text that looks like a Godot value (for example `"Vector2(1, 2)"`) is converted with `str_to_var`, but only for a safe list of types, and never if the text contains `Object(`, `Callable(` or `Signal(`.
 
@@ -615,6 +818,10 @@ else:
 | A child class loads as its parent | The child has no `class_name` and was moved, or the script is not registered ([registry](#security)), or in C# the class cache is stale ([C# builds](CSharp-Tutorial.md#building-and-running)). |
 | A variable is not saved | It is a Godot property instead of a script variable, `only_exported_values` is `true` and it has no `@export`, the class excludes it with `_forge_excluded_properties`, or (C#) it has no `[Export]`. |
 | A `Rect2`/`Transform3D` is back to its default | The variable was declared with a different type than the file holds, or the text in the file is not a form ForgeJSONGD knows. |
+| An API receives `forge_float`, `script_inheritance`... in the JSON | Add `func _forge_plain_json() -> bool: return true` to the class. See [JSON for HTTP APIs](#json-for-http-apis). |
+| A field of the API is missing or has another name in my class | Give the variable the API's key with `_forge_json_keys`. |
+| Saves stopped loading after I renamed a class or a variable | Register an alias for the class, or `_forge_renamed_properties` for the variable. See [Keeping saves working over time](#keeping-saves-working-over-time). |
+| `position` / `rotation` of a node are not saved | They are built-in properties: list them in `_forge_extra_properties`. |
 | `json_file_to_dict` returns `{}` | The file is missing, not valid JSON, or the key is wrong or missing for an encrypted file. |
 | Loading an object whose `_init` needs arguments gives a plain `Object` and an error | Add `_forge_constructor_args`, or give the parameters default values. |
 | `check_equal_jsons` says different for data that looks the same | Array order differs, or a value differs in type (`"1"` text vs `1` number). Key order and `1` vs `1.0` never matter. |

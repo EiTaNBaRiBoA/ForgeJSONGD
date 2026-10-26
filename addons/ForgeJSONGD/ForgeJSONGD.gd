@@ -3,11 +3,19 @@
 ##
 ## Settings (inherited from ForgeJSONGDBase):
 ##   ForgeJSONGD.only_exported_values - serialize only @export variables when true.
+##   ForgeJSONGD.json_indent          - indentation of the files store_json_file writes ("\t" by default, "" for compact files).
+##   ForgeJSONGD.sort_keys            - alphabetical keys when true (default), the order of the class's variables when false.
 ## Types:
 ##   ForgeJSONGD.Operation - operations accepted by json_operation().
 ##
 ## Optional methods a class can define to customize its own JSON (all start with _forge_):
 ##   func _forge_excluded_properties() -> Array   - names of variables to skip when saving and loading.
+##   func _forge_extra_properties() -> Array      - names of built-in properties (position, rotation...) to save and load too.
+##   func _forge_renamed_properties() -> Dictionary - {"old_name": "new_name"}: old saves still load into the renamed variable.
+##   func _forge_json_keys() -> Dictionary        - {"variable_name": "jsonKey"}: the key a variable uses in the JSON (API field names).
+##   func _forge_save_by_path() -> bool           - Resource classes: save a resource that comes from a file as its path.
+##   func _forge_plain_json() -> bool             - return true for a class that talks to a web API: it is written and read as
+##                                                  standard JSON (no class names, markers or prefixes; nothing in the data is interpreted).
 ##   func _forge_constructor_args() -> Array      - arguments for _init, stored and passed again on load.
 ##   func _forge_serialize() -> Dictionary        - replaces the automatic serialization of the class.
 ##   static func _forge_deserialize(json: Dictionary) -> Object - builds the instance from that dictionary.
@@ -24,7 +32,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 
 ## Converts a class instance into a JSON string.
 static func class_to_json_string(_class: Object, specify_class: bool = false) -> String:
-	return JSON.stringify(class_to_json(_class, specify_class), "", true, true) # full_precision: floats keep every digit
+	return JSON.stringify(class_to_json(_class, specify_class), "", sort_keys, true) # full_precision: floats keep every digit
 
 
 ## Stores a JSON dictionary to a file, encrypted when a security_key is given. Returns false on failure.
@@ -42,12 +50,10 @@ static func json_to_class(gdscript_or_instance: Variant, json: Dictionary) -> Ob
 	return ForgeJSONGDDeserializer.json_to_class(gdscript_or_instance, json)
 
 
-## Converts a JSON string into a class instance. Returns null if the string is not valid JSON.
+## Converts a JSON string into a class instance. Returns null if the string is not a JSON object.
 static func json_string_to_class(gdscript_or_instance: Variant, json_string: String) -> Object:
-	var json: JSON = JSON.new()
-	if json.parse(json_string) == OK:
-		return json_to_class(gdscript_or_instance, json.data)
-	return null
+	var json: Variant = _parse_json_object(json_string)
+	return json_to_class(gdscript_or_instance, json) if json != null else null
 
 
 ## Loads a JSON file into a class instance. If the file is missing or empty and a Script was given,
@@ -120,6 +126,28 @@ static func register_scripts(scripts: Array[Script]) -> void:
 ## Removes every registered script, so any script is allowed again.
 static func clear_registered_scripts() -> void:
 	_registered_scripts.clear()
+
+#endregion
+
+
+#region Script aliases (stable names)
+## A script is saved under its class_name. An alias is a name you choose and keep, so renaming the class
+## (or moving a script without a class_name) does not break saves that already exist.
+
+## Saves and loads the script under the given alias. With save_as = false the alias is only used when loading:
+## use it for the old name of a class you renamed.
+static func register_script_alias(script: Script, alias: String, save_as: bool = true) -> void:
+	if _script_aliases.has(alias) and _script_aliases[alias] != script:
+		push_warning("ForgeJSONGD: the alias '%s' now names another script." % alias)
+	_script_aliases[alias] = script
+	if save_as:
+		_alias_of[script] = alias
+
+
+## Removes every alias.
+static func clear_script_aliases() -> void:
+	_script_aliases.clear()
+	_alias_of.clear()
 
 #endregion
 

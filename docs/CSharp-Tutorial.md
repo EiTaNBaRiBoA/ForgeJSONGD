@@ -16,10 +16,11 @@ Tested with the Godot 4.7.2 .NET build, targeting `net8.0`.
 6. [Collections and inheritance](#collections-and-inheritance)
 7. [Customizing a class from C#](#customizing-a-class-from-c)
 8. [Security and the script registry](#security-and-the-script-registry)
-9. [Comparing and patching JSON](#comparing-and-patching-json)
-10. [Calling the addon without the wrapper](#calling-the-addon-without-the-wrapper)
-11. [Building and running](#building-and-running)
-12. [Limits and troubleshooting](#limits-and-troubleshooting)
+9. [JSON for HTTP APIs](#json-for-http-apis)
+10. [Comparing and patching JSON](#comparing-and-patching-json)
+11. [Calling the addon without the wrapper](#calling-the-addon-without-the-wrapper)
+12. [Building and running](#building-and-running)
+13. [Limits and troubleshooting](#limits-and-troubleshooting)
 
 ---
 
@@ -203,11 +204,16 @@ public static class Forge
 	public static Dictionary JsonOperation(Variant baseJson, Variant referenceJson, Operation operation) =>
 		Addon.Call("json_operation", baseJson, referenceJson, (int)operation).As<Dictionary>();
 
-	// --- Script registry ---
+	// --- Script registry and aliases ---
 
 	public static void RegisterScript(Script script) => Addon.Call("register_script", script);
 
 	public static void ClearRegisteredScripts() => Addon.Call("clear_registered_scripts");
+
+	public static void RegisterScriptAlias(Script script, string alias, bool saveAs = true) =>
+		Addon.Call("register_script_alias", script, alias, saveAs);
+
+	public static void ClearScriptAliases() => Addon.Call("clear_script_aliases");
 
 	// Finds (once per type) the script a C# type is attached to.
 	private static class ScriptOf<T> where T : GodotObject, new()
@@ -334,6 +340,11 @@ The optional `_forge_` methods work from C#. Godot finds them by their **exact n
 | Method | What it does |
 |---|---|
 | `public Godot.Collections.Array _forge_excluded_properties()` | Names of members to skip when saving and loading. |
+| `public Godot.Collections.Array _forge_extra_properties()` | Built-in properties to save too (for a `Node2D`: `"position"`, `"rotation"`: use Godot's snake_case property names). |
+| `public Godot.Collections.Dictionary _forge_json_keys()` | `{ "MemberName", "jsonKey" }`: the key a member uses in the JSON (API field names). |
+| `public Godot.Collections.Dictionary _forge_renamed_properties()` | `{ "OldName", "NewName" }`: old saves still load into a renamed member. |
+| `public bool _forge_plain_json()` | Return `true` for a class that talks to a web API: it is written and read as [standard JSON](GDScript-Tutorial.md#json-for-http-apis). |
+| `public bool _forge_save_by_path()` | For `Resource` classes: a resource from a file is saved as its path. |
 | `public Godot.Collections.Array _forge_constructor_args()` | Arguments passed to a constructor on load. |
 | `public Godot.Collections.Dictionary _forge_serialize()` | Replaces the automatic saving. |
 | `public GodotObject _forge_deserialize(Godot.Collections.Dictionary json)` | **Instance** method that receives the JSON and returns the finished object (C# cannot use the static form). |
@@ -408,6 +419,71 @@ A class named in the JSON that is not registered is not created:
 * in a **single object member** (`public Data Friend`) the member stays `null`, because Godot does not tell ForgeJSONGD which type a C# object member is declared with.
 
 The details are in [Security](GDScript-Tutorial.md#security).
+
+### Script aliases
+
+A C# class is saved under its class name. To keep old saves working when you rename it, register a stable alias (the same as in GDScript, see [Keeping saves working over time](GDScript-Tutorial.md#keeping-saves-working-over-time)):
+
+```csharp
+Forge.RegisterScriptAlias(GD.Load<Script>("res://ChildData.cs"), "child_v1");        // saved and loaded as "child_v1"
+Forge.RegisterScriptAlias(GD.Load<Script>("res://ChildData.cs"), "Kid", saveAs: false); // old name: loads, never written
+Forge.ClearScriptAliases();
+```
+
+---
+
+## JSON for HTTP APIs
+
+For a web API the JSON has to be standard. Mark the data class as plain once and use the same functions as for everything else (the reasons and the full rules are in [JSON for HTTP APIs](GDScript-Tutorial.md#json-for-http-apis)):
+
+```csharp
+// DtoData.cs: a data class for an API whose fields are written in camelCase.
+[GlobalClass]
+public partial class DtoData : GodotObject
+{
+	[Export] public int Id { get; set; }
+	[Export] public string UserName { get; set; } = "";
+	[Export] public bool IsAdmin { get; set; }
+	[Export] public double Score { get; set; } = 1.5;
+	[Export] public Vector2 Position { get; set; } = Vector2.Zero;
+	[Export] public Godot.Collections.Array<string> Tags { get; set; } = new();
+
+	// Members that hold a class are initialized, so loading has an object to fill.
+	[Export] public AddressData Address { get; set; } = new();
+	[Export] public Godot.Collections.Dictionary Meta { get; set; } = new();
+	[Export] public string Secret { get; set; } = "";
+
+	// C# member name -> the key the API uses.
+	public Godot.Collections.Dictionary _forge_json_keys() => new()
+	{
+		{ "Id", "id" }, { "UserName", "userName" }, { "IsAdmin", "isAdmin" }, { "Score", "score" },
+		{ "Position", "position" }, { "Tags", "tags" }, { "Address", "address" }, { "Meta", "meta" },
+	};
+
+	public Godot.Collections.Array _forge_excluded_properties() => new() { "Secret" };
+
+	// This class talks to a web API: it is written and read as standard JSON.
+	public bool _forge_plain_json() => true;
+}
+```
+
+```csharp
+string body = Forge.ClassToJsonString(request);                    // the request body: plain JSON
+DtoData reply = Forge.JsonStringToClass<DtoData>(responseText);    // the response body, null if it is not a JSON object
+```
+
+What is written for the data class above is exactly:
+
+```json
+{"address":{"city":"Tokyo","zip":"100"},"id":7,"isAdmin":true,"meta":{"1":"one","count":5,"ratio":2.0,"text":"Vector2(1, 2)"},"position":{"x":1.0,"y":2.0},"score":2.0,"tags":["a","b"],"userName":"ann"}
+```
+
+Things that are specific to C#:
+
+* **C# members have PascalCase names**, so give every member the key the API uses with `_forge_json_keys` (members without an entry keep their C# name as the key).
+* **Initialize members that hold a class** (`= new()`). A server's data cannot say which class to create, and Godot does not report the declared class of a C# object member, so loading fills the object that is already there (and keeps its class). A member that is `null` stays `null`.
+* The nested `AddressData` does not need `_forge_plain_json`: everything inside a plain class is plain.
+* A class name in a server's data (`"script_inheritance"`) is ignored. Nothing is created or loaded because a server asked for it.
 
 ---
 

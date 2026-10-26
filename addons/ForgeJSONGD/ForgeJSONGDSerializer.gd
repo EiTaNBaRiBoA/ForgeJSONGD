@@ -5,9 +5,20 @@
 ## Converts an object into a JSON dictionary. specify_class stores the script so the
 ## object can be rebuilt without a type hint (needed under inheritance).
 ## owner is the object this one is a variable of: a class declared inside the owner's script is named through it.
+## A class whose _forge_plain_json() returns true is written as plain JSON, and so is everything inside it.
 static func class_to_json(_class: Object, specify_class: bool = false, owner: Object = null) -> Dictionary:
+	if _plain or not _hook(_class, "_forge_plain_json", false):
+		return _object_to_dictionary(_class, specify_class, owner)
+	_plain = true
+	var result: Dictionary = _object_to_dictionary(_class, specify_class, owner)
+	_plain = false
+	return result
+
+
+## The variables of an object as a dictionary (see class_to_json).
+static func _object_to_dictionary(_class: Object, specify_class: bool, owner: Object) -> Dictionary:
 	var dictionary: Dictionary = {}
-	if specify_class:
+	if specify_class and not _plain: # plain JSON never carries class names
 		dictionary.set(SCRIPT_INHERITANCE, _get_script_reference(_class.get_script(), owner))
 		_add_script_uid(dictionary, _class.get_script())
 
@@ -16,15 +27,24 @@ static func class_to_json(_class: Object, specify_class: bool = false, owner: Ob
 		dictionary.merge(convert_dictionary_to_json(_class._forge_serialize(), _class), true)
 		return dictionary
 
-	var excluded: Array = _get_excluded_properties(_class)
+	var excluded: Array = _hook(_class, "_forge_excluded_properties", [])
+	var extra: Array = _hook(_class, "_forge_extra_properties", [])
 	for property: Dictionary in _class.get_property_list():
 		var property_name: String = property.get("name")
 		if property_name == "script" or property_name.is_empty() or property_name in excluded:
 			continue
-		if _check_valid_property(property):
+		if _check_valid_property(property) or property_name in extra:
 			_store_property(dictionary, property, _class.get(property_name), _class)
 
-	if _class.has_method("_forge_constructor_args"):
+	# Variables can be written under another key (camelCase names of an API, for example).
+	var json_keys: Dictionary = _hook(_class, "_forge_json_keys", {})
+	if not json_keys.is_empty():
+		var renamed: Dictionary = {} # rebuilt in the same order, so sort_keys = false still follows the variables
+		for key: Variant in dictionary:
+			renamed.set(json_keys.get(key, key), dictionary[key])
+		dictionary = renamed
+
+	if _class.has_method("_forge_constructor_args") and not _plain:
 		dictionary.set(CONSTRUCTOR_ARGS, convert_array_to_json(_class._forge_constructor_args(), _class))
 	return dictionary
 
@@ -45,14 +65,16 @@ static func convert_dictionary_to_json(dictionary: Dictionary, owner: Object = n
 	var key_builtin: int = dictionary.get_typed_key_builtin()
 	var key_script: Script = dictionary.get_typed_key_script()
 	for key: Variant in dictionary:
-		# JSON keys are text. Numbers and bools are written as their text and read back by type, text that
-		# could be mistaken for them is escaped, and the rest stays plain so files keep readable keys.
+		# JSON keys are text. Text keys are written as they are (only text that could be mistaken for a tagged key
+		# or a Godot value is escaped). In an untyped dictionary a number or bool key gets a tag that says its type;
+		# in a typed dictionary the key type is known, so its text is enough.
 		var parsed_key: Variant
+		var untyped_keys: bool = key_builtin == TYPE_NIL and key_script == null
 		match typeof(key):
 			TYPE_STRING:
-				parsed_key = _escape_text(key, key_builtin == TYPE_NIL and key_script == null)
+				parsed_key = key if _plain else _escape_text(key, true)
 			TYPE_INT, TYPE_FLOAT, TYPE_BOOL:
-				parsed_key = key
+				parsed_key = _tag_key(key) if untyped_keys and not _plain else key
 			_:
 				parsed_key = _serialize_variant(key, key_builtin, key_script, false)
 		var parsed_value: Variant = _serialize_variant(dictionary.get(key), dictionary.get_typed_value_builtin(), dictionary.get_typed_value_script(), true, owner)
@@ -62,20 +84,13 @@ static func convert_dictionary_to_json(dictionary: Dictionary, owner: Object = n
 
 #region Internals
 
-## Built-in property types that JSON.stringify can only write as display text. They are stored with var_to_str instead.
-const _TEXT_RENDERED_TYPES: Array[int] = [
-	TYPE_RECT2, TYPE_RECT2I, TYPE_AABB, TYPE_PLANE, TYPE_QUATERNION, TYPE_BASIS, TYPE_TRANSFORM2D,
-	TYPE_TRANSFORM3D, TYPE_PROJECTION, TYPE_PACKED_BYTE_ARRAY, TYPE_PACKED_VECTOR2_ARRAY,
-	TYPE_PACKED_VECTOR3_ARRAY, TYPE_PACKED_VECTOR4_ARRAY, TYPE_PACKED_COLOR_ARRAY
-]
-
 ## Stores the uid of a script without a class_name, so it can be found again if its file is moved.
 static func _add_script_uid(dictionary: Dictionary, script: Script) -> void:
-	if script == null or not script.get_global_name().is_empty() or script.resource_path.is_empty():
+	if script == null or not script.get_global_name().is_empty() or script.resource_path.is_empty() or _alias_of.has(script):
 		return
 	var uid: int = ResourceLoader.get_resource_uid(script.resource_path)
 	if uid != ResourceUID.INVALID_ID:
-		dictionary.set(SCRIPT_UID, ResourceUID.id_to_text(uid))
+		dictionary.set(_SCRIPT_UID, ResourceUID.id_to_text(uid))
 
 
 ## True when a packed array holds a value a JSON number cannot keep exactly.
@@ -91,6 +106,8 @@ static func _has_unsafe_int(values: PackedInt64Array) -> bool:
 static func _get_script_reference(script: Script, owner: Object = null) -> String:
 	if script == null:
 		return ""
+	if _alias_of.has(script):
+		return _alias_of[script] # the stable name chosen with register_script_alias
 	var script_name: String = script.get_global_name()
 	if not script_name.is_empty():
 		return script_name
@@ -120,21 +137,21 @@ static func _store_property(dictionary: Dictionary, property: Dictionary, value:
 	elif property_type == TYPE_NIL:
 		# Variant property: nothing tells the type on load, so it has to be stored with the value.
 		dictionary.set(property_name, _serialize_variant(value, TYPE_NIL, null, true, owner))
-	elif property_type in _TEXT_RENDERED_TYPES or (property_type == TYPE_PACKED_INT64_ARRAY and _has_unsafe_int(value)):
+	elif property_type in _TEXT_RENDERED_TYPES or (property_type == TYPE_PACKED_INT64_ARRAY and _has_unsafe_int(value) and not _plain):
 		# JSON would turn these into display text ("[P: (1.0, 2.0)...]") that C# cannot convert back.
 		dictionary.set(property_name, _serialize_variant(value))
 	elif _is_vector(value):
-		dictionary.set(property_name, var_to_str(value))
+		dictionary.set(property_name, _vector_to_dict(value) if _plain else var_to_str(value))
 	elif property_type == TYPE_COLOR:
 		dictionary.set(property_name, value.to_html())
 	elif property_type == TYPE_INT and property.get("hint") == PROPERTY_HINT_ENUM:
 		var enum_name: Variant = _enum_to_string(value, property.get("hint_string"))
 		if enum_name != null:
 			dictionary.set(property_name, enum_name)
-	elif value is int and _is_unsafe_int(value):
+	elif value is int and _is_unsafe_int(value) and not _plain:
 		dictionary.set(property_name, str(value)) # a JSON number would lose digits
 	elif typeof(value) == TYPE_STRING:
-		dictionary.set(property_name, _escape_text(value))
+		dictionary.set(property_name, value if _plain else _escape_text(value))
 	else:
 		dictionary.set(property_name, value)
 
@@ -142,8 +159,8 @@ static func _store_property(dictionary: Dictionary, property: Dictionary, value:
 ## Serializes an Object property: external resources by path, everything else as a nested dictionary.
 static func _serialize_object_property(property: Dictionary, value: Object, owner: Object) -> Variant:
 	if value is Resource and ResourceLoader.exists(value.resource_path):
-		# Resources stored in a file that isn't a .tres are referenced by path only.
-		if _get_main_tres_path(value.resource_path).get_extension() != "tres":
+		# Resources stored in a file that isn't a .tres are referenced by path only, and so are classes that ask for it.
+		if _get_main_tres_path(value.resource_path).get_extension() != "tres" or _is_saved_by_path(value):
 			return value.resource_path
 		return class_to_json(value)
 	if value.get_script() == null:
@@ -155,8 +172,8 @@ static func _serialize_object_property(property: Dictionary, value: Object, owne
 ## In an untyped place (mark_resource) the path is wrapped in a marker object, so loading knows it is a resource.
 static func _object_to_json(value: Object, specify_script: bool, mark_resource: bool = false, owner: Object = null) -> Variant:
 	if value is Resource and ResourceLoader.exists(value.resource_path):
-		if _get_main_tres_path(value.resource_path).get_extension() != "tres":
-			return {RESOURCE_PATH: value.resource_path} if mark_resource else value.resource_path
+		if _get_main_tres_path(value.resource_path).get_extension() != "tres" or _is_saved_by_path(value):
+			return {_RESOURCE_PATH: value.resource_path} if mark_resource else value.resource_path
 	elif value.get_script() == null:
 		return null
 	return class_to_json(value, specify_script, owner)
@@ -185,32 +202,33 @@ static func _serialize_variant(variant_value: Variant, typed_builtin: int = TYPE
 		# The script is only needed when the container doesn't already tell the class:
 		# untyped containers, or elements that are a subclass of the container's type.
 		var specify_script: bool = not is_typed or (typed_script != null and variant_value.get_script() != typed_script)
-		return _object_to_json(variant_value, specify_script, not is_typed, owner)
+		return _object_to_json(variant_value, specify_script, not is_typed and not _plain, owner)
 	if variant_value is Array:
 		return convert_array_to_json(variant_value, owner)
 	if variant_value is Dictionary:
 		return convert_dictionary_to_json(variant_value, owner)
 	if _is_vector(variant_value):
-		return var_to_str(variant_value)
+		return _vector_to_dict(variant_value) if _plain else var_to_str(variant_value)
 	if variant_value is int:
-		if _is_unsafe_int(variant_value): # a JSON number would lose digits
-			return str(variant_value) if is_typed else {INT_MARKER: str(variant_value)}
+		if _is_unsafe_int(variant_value) and not _plain: # a JSON number would lose digits
+			return str(variant_value) if is_typed else {_INT_MARKER: str(variant_value)}
 		return variant_value
 	if variant_value is float:
 		# Godot reads every JSON number as a float, so in an untyped place a whole number is read back as an int.
 		# A float with a whole value gets a marker to stay a float.
-		if not is_typed and is_finite(variant_value) and variant_value == floor(variant_value) and abs(variant_value) < MAX_SAFE_INT:
-			return {FLOAT_MARKER: variant_value}
+		if not is_typed and not _plain and is_finite(variant_value) and variant_value == floor(variant_value) and abs(variant_value) < _MAX_SAFE_INT:
+			return {_FLOAT_MARKER: variant_value}
 		return variant_value
 	if typeof(variant_value) == TYPE_STRING:
-		return _escape_text(variant_value)
+		return variant_value if _plain else _escape_text(variant_value)
+	if typeof(variant_value) == TYPE_COLOR:
+		# Hex text in typed containers, in plain JSON and for keys. In an untyped place Color(1, 0, 0, 1) keeps the type.
+		return variant_value.to_html() if (is_typed or _plain or not tag_builtins) else var_to_str(variant_value)
 	if tag_builtins and typeof(variant_value) == TYPE_PACKED_BYTE_ARRAY:
 		# base64 is much shorter than a list of numbers, and str_to_var reads both forms.
 		return 'PackedByteArray("%s")' % (Marshalls.raw_to_base64(variant_value) if not variant_value.is_empty() else "")
-	if tag_builtins and typeof(variant_value) in _TAGGED_TYPES and (not is_typed or typeof(variant_value) != TYPE_COLOR):
-		return var_to_str(variant_value) # typed Color containers keep the hex format
-	if typeof(variant_value) == TYPE_COLOR:
-		return variant_value.to_html()
+	if tag_builtins and typeof(variant_value) in _TAGGED_TYPES:
+		return var_to_str(variant_value)
 	return variant_value
 
 #endregion

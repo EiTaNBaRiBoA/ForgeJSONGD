@@ -135,9 +135,9 @@ static func _store_property(dictionary: Dictionary, property_name: String, prope
 	elif property_type == TYPE_COLOR:
 		dictionary.set(property_name, value.to_html())
 	elif property_type == TYPE_INT and property.get("hint") == PROPERTY_HINT_ENUM:
+		# By name. A number that is none of the enum's values has no name: it is kept as the number (loading reads both).
 		var enum_name: Variant = _enum_to_string(value, property.get("hint_string"))
-		if enum_name != null:
-			dictionary.set(property_name, enum_name)
+		dictionary.set(property_name, enum_name if enum_name != null else value)
 	elif value is int and _is_unsafe_int(value) and not _plain:
 		dictionary.set(property_name, str(value)) # a JSON number would lose digits
 	elif typeof(value) == TYPE_STRING:

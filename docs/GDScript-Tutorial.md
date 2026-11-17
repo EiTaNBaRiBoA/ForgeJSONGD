@@ -854,6 +854,7 @@ enum Mood { CALM, HAPPY = 5, ANGRY = 9 }
 * Names are written like Godot shows them in the inspector (`VERY_SLOW_MODE` becomes `"Very_Slow_Mode"`).
 * When loading, matching ignores upper/lower case and treats `_` and spaces the same, so `"very_slow_mode"` and `"VERY SLOW MODE"` also work. A plain number is accepted too (the integer value of the enum). An unknown name loads as `0`.
 * Custom values (`HAPPY = 5`) are respected.
+* A number that is none of the enum's values has no name, so it is saved as that number and loads back. (`validate_json` reports it.)
 * `@export_enum` works the same way, with or without values:
 
 ```gdscript

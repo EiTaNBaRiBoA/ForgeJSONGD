@@ -222,6 +222,15 @@ public static class Forge
 	public static Dictionary ClassToJsonSchema<[MustBeVariant] T>() where T : GodotObject, new() =>
 		Addon.Call("class_to_json_schema", ScriptOf<T>.Value).As<Dictionary>();
 
+	/// <summary>
+	/// Makes a schema (a Dictionary, JSON text or a file path) available to "$ref" in other schemas, under uri,
+	/// else its "$id", else (for a file) its file name. A $ref never loads files or URLs by itself.
+	/// </summary>
+	public static bool RegisterSchema(Variant schema, string uri = "") =>
+		Addon.Call("register_schema", schema, uri).AsBool();
+
+	public static void ClearRegisteredSchemas() => Addon.Call("clear_registered_schemas");
+
 	// --- Script registry and aliases ---
 
 	public static void RegisterScript(Script script) => Addon.Call("register_script", script);
@@ -554,6 +563,7 @@ if (Forge.ValidateJson<SignupData>(responseText).Count == 0)
 * `ValidateJson<T>(json)` checks against the class `T`; `ValidateJson(json, schema)` against a JSON Schema given as a `Godot.Collections.Dictionary`, JSON text or a file path. The data can be a `Godot.Collections.Dictionary`, an array, JSON text, a file path or an object.
 * Each problem is a dictionary with `"path"` (`"/address/city"`), `"keyword"` (`"type"`), `"message"` and `"schema_path"`. An empty array means valid.
 * `Forge.ClassToJsonSchema<T>()` returns the schema of a class (JSON Schema draft 2020-12), for a server, API docs or other tools. Its keys are the JSON keys, and `"required"` member names are turned into JSON keys too.
+* A schema that refers to another file (`"$ref": "common.schema.json#/$defs/id"`) needs that schema registered first: `Forge.RegisterSchema("res://schemas/common.schema.json")`, or `Forge.RegisterSchema(jsonText, "common.schema.json")`. Nothing is ever fetched by a `$ref`. `Forge.ClearRegisteredSchemas()` forgets them. See [Schemas that refer to other schemas](GDScript-Tutorial.md#schemas-that-refer-to-other-schemas).
 * Members that hold a class are initialized (`= new()`), as for loading: Godot does not report the declared class of a C# object member, so the schema uses the class of the object the member holds.
 
 ---

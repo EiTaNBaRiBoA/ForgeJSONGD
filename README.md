@@ -90,6 +90,7 @@ All methods are static: call them as `ForgeJSONGD.method(...)`.
 | `json_operation(base, reference, operation) -> Dictionary` | Patch one JSON source with another |
 | `validate_json(json, schema) -> Array[Dictionary]` | The problems of JSON data against a class or a JSON Schema (empty when valid) |
 | `class_to_json_schema(script) -> Dictionary` | The JSON Schema of a class's JSON |
+| `register_schema(schema, uri = "") -> bool`, `clear_registered_schemas()` | Make schemas from other files or URLs available to `$ref` (nothing is ever fetched) |
 | `register_script_alias(script, alias, save_as = true)`, `clear_script_aliases()` | Stable names for classes, so renames do not break saves |
 | `register_script(script)`, `register_scripts(scripts)`, `clear_registered_scripts()` | Optional allow-list of scripts |
 | `convert_array_to_json(array)`, `convert_dictionary_to_json(dictionary)` | Convert containers on their own |

@@ -124,6 +124,18 @@ static func validate_json(json: Variant, schema: Variant) -> Array[Dictionary]:
 static func class_to_json_schema(script: Script) -> Dictionary:
 	return ForgeJSONGDSchema.class_to_json_schema(script)
 
+
+## Makes a schema available to "$ref" in other schemas ("$ref": "common.schema.json#/$defs/id"). A $ref never loads
+## files or URLs by itself: it finds only schemas registered here. The schema is a Dictionary, JSON text, a file path
+## or a Script; it is registered under uri, else its "$id", else (for a file) its file name. Returns false on failure.
+static func register_schema(schema: Variant, uri: String = "") -> bool:
+	return ForgeJSONGDValidator.register_schema(schema, uri)
+
+
+## Forgets every schema registered with register_schema.
+static func clear_registered_schemas() -> void:
+	ForgeJSONGDValidator.clear_registered_schemas()
+
 #endregion
 
 

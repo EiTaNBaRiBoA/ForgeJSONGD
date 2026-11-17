@@ -13,11 +13,16 @@ const _UNSUPPORTED: Array[String] = ["unevaluatedProperties", "unevaluatedItems"
 ## Data nested deeper than this (or a $ref chain this long) is reported instead of checked.
 const _MAX_DEPTH = 256
 
-## Base URI of a schema without an $id.
-const _ROOT_URI = "urn:forge-json-schema:root"
+## Base URI of a schema without an $id. It has a path, so a relative name ("common.schema.json") resolves to
+## "forge:///common.schema.json", the same URI a schema registered under that name gets.
+const _ROOT_URI = "forge:///schema.json"
 
 ## Compiled patterns, by pattern text (null for a pattern that does not compile).
 static var _regex_cache: Dictionary = {}
+
+## Schemas registered with register_schema, by absolute URI (no fragment). A $ref to another file or URL can only
+## reach these: nothing is ever loaded or fetched by a $ref.
+static var _registered_schemas: Dictionary = {}
 
 ## What \s matches in the regular expressions of JSON Schema (ECMA-262): also the Unicode spaces.
 const _ECMA_SPACE = "\\t\\n\\x{0B}\\f\\r \\x{A0}\\x{1680}\\x{2000}-\\x{200A}\\x{2028}\\x{2029}\\x{202F}\\x{205F}\\x{3000}\\x{FEFF}"
@@ -67,6 +72,30 @@ static func validate(data: Variant, schema: Variant) -> Array[Dictionary]:
 	_index_schema(context, root, _ROOT_URI)
 	_validate(context, _to_json(read_data[1]), root, _ROOT_URI, "", "", 0)
 	return context.errors
+
+
+## Makes a schema available to $ref under a URI: the given one, else the schema's $id, else (for a file) its file name.
+## schema: a Dictionary or bool, JSON text, a JSON file path, or a Script (its class_to_json_schema).
+## Returns false (with an error printed) if the schema cannot be read or has no name.
+static func register_schema(schema: Variant, uri: String = "") -> bool:
+	var read: Array = [true, ForgeJSONGDSchema.class_to_json_schema(schema)] if schema is Script else _read_json_value(schema, "schema")
+	if not read[0] or not (read[1] is Dictionary or read[1] is bool):
+		printerr("ForgeJSONGD: register_schema: ", read[1] if not read[0] else "a schema must be a JSON object or a boolean")
+		return false
+	if uri.is_empty() and read[1] is Dictionary and read[1].get("$id") is String:
+		uri = read[1]["$id"]
+	if uri.is_empty() and (schema is String or schema is StringName) and _parse_json_object(schema) == null:
+		uri = String(schema).get_file() # a file: its name, as a $ref next to it would write it
+	if uri.is_empty():
+		printerr("ForgeJSONGD: register_schema: give the schema a name (uri), or an $id")
+		return false
+	_registered_schemas[_without_fragment(_resolve_uri(_ROOT_URI, uri))] = read[1]
+	return true
+
+
+## Forgets every schema registered with register_schema.
+static func clear_registered_schemas() -> void:
+	_registered_schemas.clear()
 
 
 #region Reading
@@ -132,6 +161,16 @@ static func _resolve_ref(context: _Context, base: String, ref: String) -> Array:
 	var hash: int = uri.find("#")
 	var document: String = uri if hash < 0 else uri.substr(0, hash)
 	var fragment: String = "" if hash < 0 else uri.substr(hash + 1).uri_decode()
+	if not context.resources.has(document):
+		# A registered schema: by its full URI, or by the name exactly as the $ref writes it ("common.schema.json").
+		var written: String = _without_fragment(_resolve_uri(_ROOT_URI, ref))
+		var registered: String = document if _registered_schemas.has(document) else (written if not ref.begins_with("#") and _registered_schemas.has(written) else "")
+		if registered.is_empty():
+			return []
+		context.resources[registered] = [_registered_schemas[registered], registered]
+		_index_schema(context, _registered_schemas[registered], registered)
+		if document != registered:
+			context.resources[document] = context.resources[registered]
 	if not context.resources.has(document):
 		return []
 	var entry: Array = context.resources[document]
@@ -261,7 +300,7 @@ static func _check_ref(context: _Context, data: Variant, ref: Variant, base: Str
 		return
 	var target: Array = _resolve_ref(context, base, ref)
 	if target.is_empty():
-		_fail(context, path, schema_path, "$ref", "the $ref '%s' cannot be found in this schema (references to other files or URLs are not loaded)" % ref)
+		_fail(context, path, schema_path, "$ref", "the $ref '%s' cannot be found: it is not in this schema or a registered one (files and URLs are never loaded, register them with register_schema)" % ref)
 		return
 	var loop_key: String = _resolve_uri(base, ref) + "|" + path
 	if context.active_refs.has(loop_key):

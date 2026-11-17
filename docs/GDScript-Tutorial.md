@@ -333,6 +333,30 @@ ForgeJSONGD.validate_json({"level": 0}, level_schema)
 #  {"path": "/level", "keyword": "minimum", "message": "must be at least 1, got 0", "schema_path": "/properties/level/minimum"}]
 ```
 
+### Schemas that refer to other schemas
+
+Schemas are often split into files: `user.schema.json` says `"$ref": "common.schema.json#/$defs/id"`. A `$ref` never loads a file or fetches a URL by itself, so register the other schema once (at startup, for example). After that every `$ref` to it works:
+
+```gdscript
+# user://schemas/common.schema.json: {"$defs": {"id": {"type": "integer", "minimum": 1}}}
+# user://schemas/user.schema.json:   {"type": "object", "properties": {"id": {"$ref": "common.schema.json#/$defs/id"}}}
+ForgeJSONGD.register_schema("user://schemas/common.schema.json")
+ForgeJSONGD.validate_json('{"id": 0}', "user://schemas/user.schema.json")
+# [{"path": "/id", "keyword": "minimum", "message": "must be at least 1, got 0", ...}]
+
+ForgeJSONGD.clear_registered_schemas() # forget every registered schema: the $ref is reported again
+```
+
+`register_schema(schema, uri = "") -> bool`
+
+* `schema`: a file path, a `Dictionary`, JSON text or a class.
+* It is registered under `uri`, else under the schema's `"$id"`, else (for a file) under its file name. A `$ref` finds it by that name exactly as written (`"common.schema.json"`, `"shared/common.json"`), or by the full URL it stands for.
+* **URLs work offline:** register a schema under `https://example.com/schemas/common.schema.json` (or give it that `$id`) and both a `$ref` to that URL and a relative `$ref` from a schema whose `$id` is `https://example.com/schemas/...` use it. You can download the file yourself with an `HTTPRequest` and register what you got.
+* Returns `false`, with an error printed, when the schema cannot be read, is not an object or a boolean, or has no name.
+* Registered schemas are global, like the [script registry](#security). Registering the same name again replaces the schema. `clear_registered_schemas()` forgets them all.
+
+What you register is all a schema can reach, so a schema from outside can never make the game read a file or contact a server.
+
 ### What `validate_json` takes and returns
 
 `validate_json(json, schema) -> Array[Dictionary]`
@@ -361,8 +385,8 @@ ForgeJSONGD.validate_json({"level": 0}, level_schema)
 
 * **Notes only:** `title`, `description`, `default`, `examples`, `$comment`, `deprecated`, `readOnly`, `writeOnly`, `format`, `contentMediaType`... describe the data but check nothing. That is the standard: in draft 2020-12 `format` (`"email"`, `"date-time"`...) is a note unless a tool chooses to check it. Use `pattern` to check the form of text. Keywords JSON Schema does not know (`"x-my-tag"`) are ignored too, as the standard says.
 * **Not supported, and reported:** `unevaluatedProperties`, `unevaluatedItems`, `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor`. A schema that uses one gets a problem saying so, so nothing passes unchecked.
-* **Nothing is loaded:** a `$ref` to another file or a URL is reported, never fetched.
-* **Tested against the standard:** the validator passes all 1,034 required tests of the official [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) for draft 2020-12 that use these keywords, and 166 of its 172 optional ones (the 6 others need numbers with more digits than Godot's JSON parser keeps). Run them with `run_tests.ps1 -SchemaSuite <folder>` in the test project.
+* **Nothing is loaded:** a `$ref` to another file or a URL finds only [registered schemas](#schemas-that-refer-to-other-schemas); anything else is reported, never fetched.
+* **Tested against the standard:** the validator passes all 1,067 required tests of the official [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) for draft 2020-12 that use these keywords (the schemas they refer to are registered with `register_schema`), and 166 of its 174 optional ones. Of the 8 others, 6 need numbers with more digits than Godot's JSON parser keeps, and 2 expect a schema that declares an older draft (`"$schema": "http://json-schema.org/draft-07/schema#"`) to follow that draft's rules: every schema is read as draft 2020-12, with the older keyword forms listed above understood. Run them with `run_tests.ps1 -SchemaSuite <folder>` in the test project.
 
 **Regular expressions** (`pattern`, `patternProperties`) are JavaScript (ECMA-262) expressions in JSON Schema. Godot's are PCRE2, which reads the usual ones the same way. ForgeJSONGD translates the parts that differ: `\s` also matches Unicode spaces, `\p{Letter}` and the other long Unicode category names, and `é`.
 
@@ -474,6 +498,10 @@ Checks data against a class or a JSON Schema and returns the problems found (emp
 #### `class_to_json_schema(script: Script) -> Dictionary`
 
 The JSON Schema of the JSON that `class_to_json` writes for the class, with the rules of its `_forge_schema`. See [Getting the schema of a class](#getting-the-schema-of-a-class).
+
+#### `register_schema(schema: Variant, uri: String = "") -> bool` and `clear_registered_schemas()`
+
+Make a schema available to `$ref` in other schemas, and forget them all. See [Schemas that refer to other schemas](#schemas-that-refer-to-other-schemas).
 
 ### Script registry
 
@@ -1025,5 +1053,6 @@ else:
 | `check_equal_jsons` says different for data that looks the same | Array order differs, or a value differs in type (`"1"` text vs `1` number). Key order and `1` vs `1.0` never matter. |
 | `validate_json` reports `"5"` for an `int` although it loads | Validation is strict on purpose: it says what is wrong with the data. Loading reads `"5"` anyway. |
 | `validate_json` says a lone string is neither JSON nor a file | Pass it as JSON text: `'"hello"'`. |
+| `validate_json` reports a `$ref` "cannot be found" | The schema it points to is in another file or at a URL: [register it](#schemas-that-refer-to-other-schemas) with `register_schema`. |
 | `validate_json` accepts any `format` (`"email"`...) | In JSON Schema 2020-12 `format` is a note. Use `pattern`. |
 | A child class's own fields are not checked in a plain class | Plain JSON names no class, so the declared class is used. Set `"additionalProperties": false`, or use a save-file class. |

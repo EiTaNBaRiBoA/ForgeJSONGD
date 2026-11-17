@@ -1039,7 +1039,8 @@ else:
 * **Objects as dictionary keys** (`Dictionary[ClassA, ClassB]`) work, but JSON keys must be text, so the key is saved as the JSON text of the object (`"{ \"classAProperty\": \"ClassAText\" }"`). It loads back as an object.
 * **Files from this version in older addons.** Older versions of ForgeJSONGD read files from this version, and restore vectors, `Color`, `Rect2` and the other types they already knew. Packed arrays in untyped places stay as text there, and the number markers (`forge_float`, `forge_int`) show up as small dictionaries.
 * **Objects without a script, `Callable` and `RID`** cannot be rebuilt (see [What is saved, and how](#what-is-saved-and-how)).
-* **Nodes.** A class that extends `Node` works like any other class (only its script variables are saved). Children and built-in properties (position, name, ...) are not saved: save the data you need in script variables.
+* **Nodes.** A class that extends `Node` works like any other class (only its script variables are saved). Children and built-in properties (position, name, ...) are not saved: save the data you need in script variables, or list built-in properties in [`_forge_extra_properties`](#saving-built-in-properties-such-as-position).
+* **Freeing what you load.** Objects of a class that extends `RefCounted` or `Resource` (also a class with no `extends`) are freed by Godot. A class that extends `Node` or `Object` is not, as always in Godot: add the loaded nodes to the scene tree or call `free()` on them when you are done, including the plain `Object` that `json_to_class(null, json)` returns when the JSON names no usable class. For data, prefer `RefCounted` or `Resource`.
 * **Global settings.** `only_exported_values` and the script registry are global: they apply to every call until you change them.
 * **A class whose `_init` needs arguments** needs `_forge_constructor_args` (see [Customizing a class](#customizing-a-class)).
 

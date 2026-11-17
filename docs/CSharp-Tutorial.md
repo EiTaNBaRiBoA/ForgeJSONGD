@@ -102,7 +102,7 @@ Godot has to know your class and its members, so:
 | Rule | Why |
 |---|---|
 | Mark the class `partial` and `[GlobalClass]` | Godot registers global classes by name. ForgeJSONGD finds classes (children, nested objects) by that name. |
-| Inherit from `GodotObject`, `RefCounted`, `Resource` or `Node` | Plain C# classes are not Godot objects. For data, `GodotObject` or `RefCounted` is enough. |
+| Inherit from `GodotObject`, `RefCounted`, `Resource` or `Node` | Plain C# classes are not Godot objects. For data, `GodotObject` or `RefCounted` is enough. `RefCounted` and `Resource` objects are freed by Godot; a `GodotObject` or `Node` you created or loaded must be freed by you (`Free()`), as always in Godot. |
 | **One class per file, and the file name is the class name** (`Data` in `Data.cs`) | Godot attaches one script per file. A second class in the same file cannot be loaded by name. |
 | Mark every member you want saved with `[Export]` | Godot only knows exported members. |
 | Give the class a parameterless constructor | `Forge.JsonToClass<T>` requires it (`new()`), and ForgeJSONGD uses it when there are no stored constructor arguments. Extra constructors are allowed, see [constructor arguments](#customizing-a-class-from-c). |

@@ -35,11 +35,38 @@ static func class_to_json_schema(script: Script) -> Dictionary:
 		var root_ref: String = _class_ref(generation, script, false)
 		for instance: Object in generation.instances:
 			if not instance is RefCounted:
-				instance.free()
+				_free_instance(instance, _new_instance(instance.get_script()), {})
 		# The $id makes the "#/$defs/..." references work when this schema is put inside another one ("items": schema).
 		var id: String = "urn:forgejsongd:" + root_ref.get_file()
 		_cache[cache_key] = {"$schema": _DIALECT, "$id": id, "$ref": root_ref, "type": "object", "$defs": generation.definitions}
 	return _cache[cache_key].duplicate(true)
+
+
+## Frees an instance that was created only to read its class, together with the objects it created for its own
+## variables (the ones Godot does not free by itself). Those are told apart from objects it merely points to (an
+## autoload, a shared object) with a second instance: what both hold is shared and left alone, what differs was
+## created by each for itself. Frees the second instance the same way.
+static func _free_instance(instance: Object, twin: Object, visited: Dictionary) -> void:
+	if visited.has(instance):
+		return
+	visited[instance] = true
+	if twin != null:
+		for property: Dictionary in instance.get_property_list():
+			if property.type != TYPE_OBJECT or not property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+				continue
+			var mine: Variant = instance.get(property.name)
+			var theirs: Variant = twin.get(property.name)
+			if _is_freed_by_hand(mine) and _is_freed_by_hand(theirs) and mine != theirs:
+				_free_instance(mine, theirs, visited)
+		if is_instance_valid(twin):
+			twin.free()
+	if is_instance_valid(instance):
+		instance.free()
+
+
+## True for a live object that Godot does not free by itself.
+static func _is_freed_by_hand(value: Variant) -> bool:
+	return value is Object and is_instance_valid(value) and not value is RefCounted
 
 
 ## Forgets the generated schemas (called when script aliases change).
@@ -146,16 +173,21 @@ static func _instance_of(generation: _Generation, script: Script) -> Object:
 	if not script.can_instantiate():
 		return null
 	# A class whose _init needs arguments gets empty ones (0, "", null...): only its variables and hooks are read.
+	var instance: Object = _new_instance(script)
+	if instance != null:
+		generation.instances.append(instance)
+	return instance
+
+
+## Creates an object of the script. A class whose _init needs arguments gets empty ones (0, "", null...).
+static func _new_instance(script: Script) -> Object:
 	var arguments: Array = []
 	for method: Dictionary in script.get_script_method_list():
 		if method.name == "_init":
 			for i: int in method.args.size() - method.default_args.size():
 				arguments.append(type_convert(null, method.args[i].type))
 			break
-	var instance: Object = script.new.callv(arguments)
-	if instance != null:
-		generation.instances.append(instance)
-	return instance
+	return script.new.callv(arguments)
 
 
 ## A readable, unique name for the definition of a class. A class used both in a save file and inside a plain class

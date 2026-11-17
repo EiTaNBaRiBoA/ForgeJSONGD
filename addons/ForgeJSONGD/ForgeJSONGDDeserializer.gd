@@ -133,8 +133,24 @@ static func _assign_object(target: Object, property: Dictionary, current: Object
 		script_type = current.get_script() as Script
 	if script_type == null:
 		script_type = _get_declared_script(target, property.get("class_name"))
-	if script_type != null:
+	if script_type == null:
+		return
+	if _fills_in_place(current, script_type, value):
+		json_to_class(current, value)
+	else:
 		target.set(property_name, json_to_class(script_type, value))
+
+
+## True when the object a variable already holds is filled where it is instead of being replaced by a new one:
+## an object that Godot does not free by itself (a class that extends Object or Node, GodotObject in C#) and that
+## already has the wanted class. Replacing it would leave the old object unfreed, and would swap a Node that is in
+## the scene tree for one that is not. (A class that builds itself, or is created with stored arguments, is created.)
+static func _fills_in_place(current: Object, script: Script, json: Dictionary) -> bool:
+	if current == null or current is RefCounted or current.get_script() != script:
+		return false
+	if script.has_method("_forge_deserialize") or current.has_method("_forge_deserialize"):
+		return false
+	return not (json.has(CONSTRUCTOR_ARGS) and not _plain and _script_has_method(script, "_forge_constructor_args"))
 
 
 ## Assigns a Variant, Color, enum, int or other basic property.

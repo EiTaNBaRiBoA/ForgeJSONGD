@@ -112,7 +112,7 @@ static func _write_json_file(file_path: String, data: Dictionary, security_key: 
 	_check_dir(file_path)
 	var file: FileAccess = _open_file(file_path, FileAccess.WRITE, security_key)
 	if not file:
-		printerr("Error writing to a file")
+		printerr("ForgeJSONGD: cannot write the file ", file_path)
 		return false
 	file.store_string(_stringify(data, json_indent, sort_keys))
 	file.close()
@@ -136,7 +136,7 @@ static func _read_json_file(file_path: String, security_key: String = "") -> Dic
 		return {}
 	var file: FileAccess = _open_file(file_path, FileAccess.READ, security_key)
 	if not file:
-		printerr("Error opening file: ", file_path)
+		printerr("ForgeJSONGD: cannot open the file ", file_path)
 		return {}
 	var text: String = file.get_as_text()
 	file.close()
@@ -154,7 +154,50 @@ static func _read_json_file(file_path: String, security_key: String = "") -> Dic
 #endregion
 
 
-#region Checks and Gets
+#region JSON data
+
+## Parses JSON text. Returns the Dictionary, or null if the text is not valid JSON or not a JSON object.
+static func _parse_json_object(text: String) -> Variant:
+	var parser: JSON = JSON.new()
+	if parser.parse(text) == OK and parser.data is Dictionary:
+		return parser.data
+	return null
+
+
+## Gets a dictionary from an object, a dictionary, a JSON string or a JSON file path.
+static func _get_dict_from_type(json: Variant) -> Dictionary:
+	if json is Dictionary:
+		return json
+	if json is Object:
+		return ForgeJSONGDSerializer.class_to_json(json)
+	if not json is String:
+		return {}
+	var parsed: Variant = _parse_json_object(json)
+	if parsed != null:
+		return parsed
+	# Not a JSON string, so treat it as a file path.
+	return _read_json_file(json)
+
+
+## Converts data to what it would be after being saved and loaded again: numbers become floats,
+## keys are sorted and text-like values become strings. Makes data from files and classes comparable.
+static func _normalize_json(data: Variant) -> Variant:
+	return JSON.parse_string(_stringify(data, "", true, false))
+
+
+## Checks if two dictionaries hold the same JSON data, ignoring key order and int/float differences.
+static func _jsons_equal(first: Dictionary, second: Dictionary) -> bool:
+	return _normalize_json(first) == _normalize_json(second)
+
+#endregion
+
+
+#region Variables and hooks of a class
+
+## Calls an optional _forge_ method of a class (see the list in ForgeJSONGD.gd), or returns the fallback if it has none.
+static func _hook(object: Object, hook_name: String, fallback: Variant) -> Variant:
+	return object.call(hook_name) if object.has_method(hook_name) else fallback
+
 
 ## Checks if a property should be included during serialization or deserialization.
 static func _check_valid_property(property: Dictionary) -> bool:
@@ -178,14 +221,179 @@ static func _json_properties(object: Object) -> Dictionary:
 	return properties
 
 
+## The names and values of an enum variable, read from its property hint: "Idle:0,Very Fast:5", or "Warrior,Mage"
+## where a name without a value gets the value before it plus 1 (as in the editor). The names are the ones written
+## to JSON: a space becomes "_". Shared by saving, loading and class_to_json_schema.
+static func _enum_values(hint_string: String) -> Dictionary:
+	var values: Dictionary = {}
+	var next_value: int = 0
+	for entry: String in hint_string.split(","):
+		var parts: PackedStringArray = entry.split(":")
+		if parts.size() > 1:
+			next_value = parts[1].to_int()
+		values[parts[0].replace(" ", "_")] = next_value
+		next_value += 1
+	return values
+
+#endregion
+
+
+#region Scripts and resources
+
+## Finds a Script by its global class name or resource path.
+static func _get_gdscript(hint_class: String) -> Script:
+	if _global_class_paths.is_empty():
+		for class_info: Dictionary in ProjectSettings.get_global_class_list(): # the list is built once, not for every object
+			_global_class_paths[class_info.class] = class_info.path
+	if _global_class_paths.has(hint_class):
+		return load(_global_class_paths[hint_class])
+	if ResourceLoader.exists(hint_class):
+		return load(hint_class)
+	return null
+
+
+## Finds the script of a variable's declared class: a global class, or a class declared inside the owner's script.
+static func _get_declared_script(owner: Object, hint_class: String) -> Script:
+	var script: Script = _get_gdscript(hint_class)
+	return script if script != null else _find_inner_script(owner, hint_class)
+
+
+## Finds a class declared inside the script of owner (or of one of its base scripts).
+static func _find_inner_script(owner: Object, class_name_text: String) -> Script:
+	var owner_script: Script = owner.get_script() if owner != null else null
+	while owner_script != null:
+		var constants: Dictionary = owner_script.get_script_constant_map()
+		if constants.get(class_name_text) is Script:
+			return constants[class_name_text]
+		owner_script = owner_script.get_base_script()
+	return null
+
+
+## Finds the script a JSON object names with "script_inheritance": an alias, a class name, a path, the uid stored
+## next to it (the file may have moved), or "::Name" for a class declared inside the script of owner.
+## Returns null if there is none, it is unknown or not registered. Plain JSON never names a script.
+static func _script_from_json(json: Dictionary, owner: Object = null) -> Script:
+	if _plain or not json.get(SCRIPT_INHERITANCE) is String:
+		return null
+	var script_name: String = json[SCRIPT_INHERITANCE]
+	if script_name.begins_with("::"):
+		return _find_inner_script(owner, script_name.substr(2)) # the owner's own code, so the allow-list does not apply
+	var script: Script = _script_aliases.get(script_name)
+	if script == null:
+		script = _get_gdscript(script_name)
+	if script == null and json.get(_SCRIPT_UID) is String:
+		var uid: int = ResourceUID.text_to_id(json[_SCRIPT_UID])
+		if ResourceUID.has_id(uid):
+			script = load(ResourceUID.get_id_path(uid)) as Script
+	if script != null and not _is_script_allowed(script):
+		push_warning("ForgeJSONGD: script '%s' is not registered, ignoring it." % script_name)
+		return null
+	return script
+
+
+## Returns true if the script may be created from JSON data (always true when nothing is registered).
+static func _is_script_allowed(script: Script) -> bool:
+	return _registered_scripts.is_empty() or script in _registered_scripts
+
+
+## True if the script defines a method with this name (its own or inherited from a script).
+static func _script_has_method(script: Script, method_name: String) -> bool:
+	for method: Dictionary in script.get_script_method_list():
+		if method.name == method_name:
+			return true
+	return false
+
+
+## True for a resource that comes from a file (the empty path of a resource made in code is checked first:
+## asking the ResourceLoader about it is slow).
+static func _is_file_resource(value: Variant) -> bool:
+	return value is Resource and not value.resource_path.is_empty() and ResourceLoader.exists(value.resource_path)
+
+
+## True for a resource from a file whose class asks to be saved as its path with _forge_save_by_path().
+static func _is_saved_by_path(resource: Resource) -> bool:
+	return _hook(resource, "_forge_save_by_path", false)
+
+
+## Extracts the main path from a resource path (removes the sub-resource part if present).
+static func _get_main_tres_path(path: String) -> String:
+	return path.split("::", true, 1)[0]
+
+#endregion
+
+
+#region Numbers, text and keys
+
+## True for an int that a JSON number cannot hold exactly (2^53 and above, in either direction).
+static func _is_unsafe_int(number: int) -> bool:
+	return number >= _MAX_SAFE_INT or number <= -_MAX_SAFE_INT
+
+
+## True when a container is not typed, so nothing tells the type of its values when loading.
+static func _is_untyped(type: Variant) -> bool:
+	return type == null or (type is int and type == TYPE_NIL)
+
+
+## Checks if a string is safe to be processed by str_to_var.
+static func _is_safe_type(p_str: String) -> bool:
+	# Ordinary text is ruled out by its last character, before anything else is looked at.
+	var is_safe := false
+	if p_str.ends_with(")"):
+		is_safe = p_str.substr(0, p_str.find("(")) in _SAFE_PREFIXES
+	elif p_str.ends_with("\""):
+		# Also allow NodePath and StringName literals
+		is_safe = p_str.begins_with("@\"") or p_str.begins_with("&\"")
+
+	# Even a safe-looking string must not contain dangerous instantiations
+	return is_safe and not ("Object(" in p_str or "Callable(" in p_str or "Signal(" in p_str)
+
+
+## Text that would be read as something else gets _TEXT_PREFIX: a Godot value ("Vector2(1, 2)") and text starting
+## with the prefix itself. A dictionary key is also escaped when it starts like a tagged number or bool key.
+static func _escape_text(text: String, is_key: bool = false) -> String:
+	if text.begins_with(_TEXT_PREFIX) or _is_safe_type(text):
+		return _TEXT_PREFIX + text
+	if is_key and (text.begins_with(_KEY_INT) or text.begins_with(_KEY_FLOAT) or text.begins_with(_KEY_BOOL)):
+		return _TEXT_PREFIX + text
+	return text
+
+
+## Removes _TEXT_PREFIX from text written by _escape_text.
+static func _unescape_text(text: String) -> String:
+	return text.substr(_TEXT_PREFIX.length()) if text.begins_with(_TEXT_PREFIX) else text
+
+
+## The text of a number or bool dictionary key in an untyped dictionary, with a tag that says its type.
+static func _tag_key(key: Variant) -> String:
+	match typeof(key):
+		TYPE_INT:
+			return _KEY_INT + str(key)
+		TYPE_FLOAT:
+			return _KEY_FLOAT + JSON.stringify(key, "", true, true)
+		_:
+			return _KEY_BOOL + ("true" if key else "false")
+
+
+## Reads a key written by _tag_key. Returns null if the text is not a tagged key.
+static func _untag_key(text: String) -> Variant:
+	if text.begins_with(_KEY_INT) and text.substr(_KEY_INT.length()).is_valid_int():
+		return text.substr(_KEY_INT.length()).to_int()
+	if text.begins_with(_KEY_FLOAT) and text.substr(_KEY_FLOAT.length()).is_valid_float():
+		return text.substr(_KEY_FLOAT.length()).to_float()
+	if text.begins_with(_KEY_BOOL):
+		var value: String = text.substr(_KEY_BOOL.length())
+		if value == "true" or value == "false":
+			return value == "true"
+	return null
+
+#endregion
+
+
+#region Vectors
+
 ## Returns true if the value is one of the six vector types.
 static func _is_vector(value: Variant) -> bool:
 	return _is_vector_type(typeof(value))
-
-
-## Calls an optional _forge_ method of a class (see the list in ForgeJSONGD.gd), or returns the fallback if it has none.
-static func _hook(object: Object, hook_name: String, fallback: Variant) -> Variant:
-	return object.call(hook_name) if object.has_method(hook_name) else fallback
 
 
 ## True for the six vector types.
@@ -230,180 +438,5 @@ static func _vector_from_dict(type: int, data: Dictionary) -> Variant:
 		TYPE_VECTOR4I:
 			return Vector4i(int(numbers[0]), int(numbers[1]), int(numbers[2]), int(numbers[3]))
 	return null
-
-
-## True if the script defines a method with this name (its own or inherited from a script).
-static func _script_has_method(script: Script, method_name: String) -> bool:
-	for method: Dictionary in script.get_script_method_list():
-		if method.name == method_name:
-			return true
-	return false
-
-
-## True for a resource from a file whose class asks to be saved as its path with _forge_save_by_path().
-static func _is_saved_by_path(resource: Resource) -> bool:
-	return _hook(resource, "_forge_save_by_path", false)
-
-
-## Returns true if the script may be created from JSON data (always true when nothing is registered).
-static func _is_script_allowed(script: Script) -> bool:
-	return _registered_scripts.is_empty() or script in _registered_scripts
-
-
-## Finds the script a JSON object names with "script_inheritance": an alias, a class name, a path, the uid stored
-## next to it (the file may have moved), or "::Name" for a class declared inside the script of owner.
-## Returns null if there is none, it is unknown or not registered. Plain JSON never names a script.
-static func _script_from_json(json: Dictionary, owner: Object = null) -> Script:
-	if _plain or not json.get(SCRIPT_INHERITANCE) is String:
-		return null
-	var script_name: String = json[SCRIPT_INHERITANCE]
-	if script_name.begins_with("::"):
-		return _find_inner_script(owner, script_name.substr(2)) # the owner's own code, so the allow-list does not apply
-	var script: Script = _script_aliases.get(script_name)
-	if script == null:
-		script = _get_gdscript(script_name)
-	if script == null and json.get(_SCRIPT_UID) is String:
-		var uid: int = ResourceUID.text_to_id(json[_SCRIPT_UID])
-		if ResourceUID.has_id(uid):
-			script = load(ResourceUID.get_id_path(uid)) as Script
-	if script != null and not _is_script_allowed(script):
-		push_warning("ForgeJSONGD: script '%s' is not registered, ignoring it." % script_name)
-		return null
-	return script
-
-
-## Finds a class declared inside the script of owner (or of one of its base scripts).
-static func _find_inner_script(owner: Object, class_name_text: String) -> Script:
-	var owner_script: Script = owner.get_script() if owner != null else null
-	while owner_script != null:
-		var constants: Dictionary = owner_script.get_script_constant_map()
-		if constants.get(class_name_text) is Script:
-			return constants[class_name_text]
-		owner_script = owner_script.get_base_script()
-	return null
-
-
-## Finds the script of a variable's declared class: a global class, or a class declared inside the owner's script.
-static func _get_declared_script(owner: Object, hint_class: String) -> Script:
-	var script: Script = _get_gdscript(hint_class)
-	return script if script != null else _find_inner_script(owner, hint_class)
-
-
-## True for an int that a JSON number cannot hold exactly (2^53 and above, in either direction).
-static func _is_unsafe_int(number: int) -> bool:
-	return number >= _MAX_SAFE_INT or number <= -_MAX_SAFE_INT
-
-
-## True when a container is not typed, so nothing tells the type of its values when loading.
-static func _is_untyped(type: Variant) -> bool:
-	return type == null or (type is int and type == TYPE_NIL)
-
-
-## Text that would be read as something else gets _TEXT_PREFIX: a Godot value ("Vector2(1, 2)") and text starting
-## with the prefix itself. A dictionary key is also escaped when it starts like a tagged number or bool key.
-static func _escape_text(text: String, is_key: bool = false) -> String:
-	if text.begins_with(_TEXT_PREFIX) or _is_safe_type(text):
-		return _TEXT_PREFIX + text
-	if is_key and (text.begins_with(_KEY_INT) or text.begins_with(_KEY_FLOAT) or text.begins_with(_KEY_BOOL)):
-		return _TEXT_PREFIX + text
-	return text
-
-
-## The text of a number or bool dictionary key in an untyped dictionary, with a tag that says its type.
-static func _tag_key(key: Variant) -> String:
-	match typeof(key):
-		TYPE_INT:
-			return _KEY_INT + str(key)
-		TYPE_FLOAT:
-			return _KEY_FLOAT + JSON.stringify(key, "", true, true)
-		_:
-			return _KEY_BOOL + ("true" if key else "false")
-
-
-## Reads a key written by _tag_key. Returns null if the text is not a tagged key.
-static func _untag_key(text: String) -> Variant:
-	if text.begins_with(_KEY_INT) and text.substr(_KEY_INT.length()).is_valid_int():
-		return text.substr(_KEY_INT.length()).to_int()
-	if text.begins_with(_KEY_FLOAT) and text.substr(_KEY_FLOAT.length()).is_valid_float():
-		return text.substr(_KEY_FLOAT.length()).to_float()
-	if text.begins_with(_KEY_BOOL):
-		var value: String = text.substr(_KEY_BOOL.length())
-		if value == "true" or value == "false":
-			return value == "true"
-	return null
-
-
-## Removes _TEXT_PREFIX from text written by _escape_text.
-static func _unescape_text(text: String) -> String:
-	return text.substr(_TEXT_PREFIX.length()) if text.begins_with(_TEXT_PREFIX) else text
-
-
-## Finds a Script by its global class name or resource path.
-static func _get_gdscript(hint_class: String) -> Script:
-	if _global_class_paths.is_empty():
-		for class_info: Dictionary in ProjectSettings.get_global_class_list(): # the list is built once, not for every object
-			_global_class_paths[class_info.class] = class_info.path
-	if _global_class_paths.has(hint_class):
-		return load(_global_class_paths[hint_class])
-	if ResourceLoader.exists(hint_class):
-		return load(hint_class)
-	return null
-
-
-## Extracts the main path from a resource path (removes the sub-resource part if present).
-static func _get_main_tres_path(path: String) -> String:
-	return path.split("::", true, 1)[0]
-
-
-## Parses JSON text. Returns the Dictionary, or null if the text is not valid JSON or not a JSON object.
-static func _parse_json_object(text: String) -> Variant:
-	var parser: JSON = JSON.new()
-	if parser.parse(text) == OK and parser.data is Dictionary:
-		return parser.data
-	return null
-
-
-## Gets a dictionary from an object, a dictionary, a JSON string or a JSON file path.
-static func _get_dict_from_type(json: Variant) -> Dictionary:
-	if json is Dictionary:
-		return json
-	if json is Object:
-		return ForgeJSONGDSerializer.class_to_json(json)
-	if not json is String:
-		return {}
-	var parsed: Variant = _parse_json_object(json)
-	if parsed != null:
-		return parsed
-	# Not a JSON string, so treat it as a file path.
-	return _read_json_file(json)
-
-
-## Converts data to what it would be after being saved and loaded again: numbers become floats,
-## keys are sorted and text-like values become strings. Makes data from files and classes comparable.
-static func _normalize_json(data: Variant) -> Variant:
-	return JSON.parse_string(_stringify(data, "", true, false))
-
-
-## Checks if two dictionaries hold the same JSON data, ignoring key order and int/float differences.
-static func _jsons_equal(first: Dictionary, second: Dictionary) -> bool:
-	return _normalize_json(first) == _normalize_json(second)
-
-
-## Checks if a string is safe to be processed by str_to_var.
-static func _is_safe_type(p_str: String) -> bool:
-	if p_str.is_empty():
-		return false
-
-	var is_safe := false
-	for prefix: String in _SAFE_PREFIXES:
-		if p_str.begins_with(prefix + "(") and p_str.ends_with(")"):
-			is_safe = true
-			break
-	# Also allow NodePath and StringName literals
-	if not is_safe:
-		is_safe = (p_str.begins_with("@\"") or p_str.begins_with("&\"")) and p_str.ends_with("\"")
-
-	# Even a safe-looking string must not contain dangerous instantiations
-	return is_safe and not ("Object(" in p_str or "Callable(" in p_str or "Signal(" in p_str)
 
 #endregion

@@ -850,10 +850,17 @@ enum Mood { CALM, HAPPY = 5, ANGRY = 9 }
 @export var mood: Mood = Mood.ANGRY   # saved as "Angry"
 ```
 
-* The enum must be on a variable with a declared enum type.
+* The enum must be on a variable with a declared enum type, or an `int` with `@export_enum`.
 * Names are written like Godot shows them in the inspector (`VERY_SLOW_MODE` becomes `"Very_Slow_Mode"`).
 * When loading, matching ignores upper/lower case and treats `_` and spaces the same, so `"very_slow_mode"` and `"VERY SLOW MODE"` also work. A plain number is accepted too (the integer value of the enum). An unknown name loads as `0`.
 * Custom values (`HAPPY = 5`) are respected.
+* `@export_enum` works the same way, with or without values:
+
+```gdscript
+@export_enum("Warrior", "Mage", "Thief") var job: int = 1            # saved as "Mage" (values 0, 1, 2)
+@export_enum("Slow:30", "Average:60", "Very Fast:200") var speed: int # 200 is saved as "Very_Fast"
+@export_enum("Rebecca", "Mary", "Leah") var hero: String             # a String: saved as its text
+```
 
 ---
 

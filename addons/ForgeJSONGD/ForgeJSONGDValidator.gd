@@ -10,6 +10,12 @@ const _SCHEMA_MAP_KEYWORDS: Array[String] = ["properties", "patternProperties", 
 ## Keywords of the standard that are not supported. A schema that uses one is reported, so nothing is silently unchecked.
 const _UNSUPPORTED: Array[String] = ["unevaluatedProperties", "unevaluatedItems", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor"]
 
+## allOf, anyOf and oneOf hold a list of schemas the same value is checked against.
+const _COMBINING_KEYWORDS: Array[String] = ["allOf", "anyOf", "oneOf"]
+
+## Stands for "properties" / "patternProperties" in a schema that has none.
+const _NO_SCHEMAS: Dictionary = {}
+
 ## Data nested deeper than this (or a $ref chain this long) is reported instead of checked.
 const _MAX_DEPTH = 256
 
@@ -55,10 +61,8 @@ class _Context:
 ## (its class_to_json_schema). Returns the problems found; an empty array means the data is valid.
 static func validate(data: Variant, schema: Variant) -> Array[Dictionary]:
 	var context := _Context.new()
-	if schema is Object and not schema is Script and schema.get_script() != null:
-		schema = schema.get_script() # an object stands for its class
 	var read_data: Array = _read_json_value(data, "data")
-	var read_schema: Array = [true, ForgeJSONGDSchema.class_to_json_schema(schema)] if schema is Script else _read_json_value(schema, "schema")
+	var read_schema: Array = _read_schema(schema)
 	if not read_data[0] or not read_schema[0]:
 		for result: Array in [read_data, read_schema]:
 			if not result[0]:
@@ -74,11 +78,13 @@ static func validate(data: Variant, schema: Variant) -> Array[Dictionary]:
 	return context.errors
 
 
+#region Registered schemas
+
 ## Makes a schema available to $ref under a URI: the given one, else the schema's $id, else (for a file) its file name.
 ## schema: a Dictionary or bool, JSON text, a JSON file path, or a Script (its class_to_json_schema).
 ## Returns false (with an error printed) if the schema cannot be read or has no name.
 static func register_schema(schema: Variant, uri: String = "") -> bool:
-	var read: Array = [true, ForgeJSONGDSchema.class_to_json_schema(schema)] if schema is Script else _read_json_value(schema, "schema")
+	var read: Array = _read_schema(schema)
 	if not read[0] or not (read[1] is Dictionary or read[1] is bool):
 		printerr("ForgeJSONGD: register_schema: ", read[1] if not read[0] else "a schema must be a JSON object or a boolean")
 		return false
@@ -97,8 +103,20 @@ static func register_schema(schema: Variant, uri: String = "") -> bool:
 static func clear_registered_schemas() -> void:
 	_registered_schemas.clear()
 
+#endregion
+
 
 #region Reading
+
+## Reads a schema: the schema of a class (given as a Script, or as an object of the class), or JSON Schema data
+## in any of the forms _read_json_value accepts. Returns [true, schema] or [false, problem].
+static func _read_schema(schema: Variant) -> Array:
+	if schema is Object and not schema is Script and schema.get_script() != null:
+		schema = schema.get_script() # an object stands for its class
+	if schema is Script:
+		return [true, ForgeJSONGDSchema.class_to_json_schema(schema)]
+	return _read_json_value(schema, "schema")
+
 
 ## Reads data or a schema given in any of the accepted forms. Returns [true, value] or [false, problem].
 static func _read_json_value(value: Variant, what: String) -> Array:
@@ -156,8 +174,7 @@ static func _index_schema(context: _Context, schema: Variant, base: String) -> v
 
 
 ## Finds the schema a $ref points to. Returns [schema, base URI], or [] if it is not part of this schema.
-static func _resolve_ref(context: _Context, base: String, ref: String) -> Array:
-	var uri: String = _resolve_uri(base, ref)
+static func _resolve_ref(context: _Context, uri: String, ref: String) -> Array:
 	var hash: int = uri.find("#")
 	var document: String = uri if hash < 0 else uri.substr(0, hash)
 	var fragment: String = "" if hash < 0 else uri.substr(hash + 1).uri_decode()
@@ -298,11 +315,12 @@ static func _check_ref(context: _Context, data: Variant, ref: Variant, base: Str
 	if not ref is String:
 		_fail(context, path, schema_path, "$ref", "$ref must be text")
 		return
-	var target: Array = _resolve_ref(context, base, ref)
+	var uri: String = _resolve_uri(base, ref)
+	var target: Array = _resolve_ref(context, uri, ref)
 	if target.is_empty():
 		_fail(context, path, schema_path, "$ref", "the $ref '%s' cannot be found: it is not in this schema or a registered one (files and URLs are never loaded, register them with register_schema)" % ref)
 		return
-	var loop_key: String = _resolve_uri(base, ref) + "|" + path
+	var loop_key: String = uri + "|" + path
 	if context.active_refs.has(loop_key):
 		_fail(context, path, schema_path, "$ref", "the $ref '%s' loops back to itself without checking anything" % ref)
 		return
@@ -343,28 +361,37 @@ static func _check_number(context: _Context, number: float, schema: Dictionary, 
 			_fail(context, path, schema_path + "/multipleOf", "multipleOf", "multipleOf must be a number above 0")
 		elif not _is_multiple(number, float(divisor)):
 			_fail(context, path, schema_path + "/multipleOf", "multipleOf", "must be a multiple of %s, got %s" % [_short(divisor), _short(number)])
-	# exclusiveMinimum / exclusiveMaximum are numbers; true/false next to minimum / maximum is the older (draft 4) form.
-	for limit: Array in [["minimum", "exclusiveMinimum", 1.0], ["maximum", "exclusiveMaximum", -1.0]]:
-		var inclusive: Variant = schema.get(limit[0])
-		var exclusive: Variant = schema.get(limit[1])
-		var direction: float = limit[2]
-		if exclusive is bool and _is_number(inclusive):
-			if exclusive:
-				exclusive = inclusive
-				inclusive = null
-			else:
-				exclusive = null
-		for keyword_and_value: Array in [[limit[0], inclusive, false], [limit[1], exclusive, true]]:
-			var bound: Variant = keyword_and_value[1]
-			if bound == null:
-				continue
-			if not _is_number(bound):
-				_fail(context, path, schema_path + "/" + keyword_and_value[0], keyword_and_value[0], "%s must be a number" % keyword_and_value[0])
-				continue
-			var difference: float = (number - float(bound)) * direction # above 0 when the value is on the allowed side
-			if difference < 0 or (keyword_and_value[2] and difference == 0):
-				var words: String = ("at least %s" if not keyword_and_value[2] else "more than %s") if direction > 0 else ("at most %s" if not keyword_and_value[2] else "less than %s")
-				_fail(context, path, schema_path + "/" + keyword_and_value[0], keyword_and_value[0], "must be %s, got %s" % [words % _short(bound), _short(number)])
+	_check_limits(context, number, schema, "minimum", "exclusiveMinimum", 1.0, path, schema_path)
+	_check_limits(context, number, schema, "maximum", "exclusiveMaximum", -1.0, path, schema_path)
+
+
+## The lower limits (direction 1) or the upper limits (direction -1) of a number. exclusiveMinimum / exclusiveMaximum
+## are numbers; true / false next to minimum / maximum is the older (draft 4) form.
+static func _check_limits(context: _Context, number: float, schema: Dictionary, inclusive_keyword: String, exclusive_keyword: String, direction: float, path: String, schema_path: String) -> void:
+	var inclusive: Variant = schema.get(inclusive_keyword)
+	var exclusive: Variant = schema.get(exclusive_keyword)
+	if inclusive == null and exclusive == null:
+		return
+	if exclusive is bool and _is_number(inclusive):
+		if exclusive:
+			exclusive = inclusive
+			inclusive = null
+		else:
+			exclusive = null
+	_check_limit(context, number, inclusive, inclusive_keyword, direction, false, path, schema_path)
+	_check_limit(context, number, exclusive, exclusive_keyword, direction, true, path, schema_path)
+
+
+static func _check_limit(context: _Context, number: float, bound: Variant, keyword: String, direction: float, is_exclusive: bool, path: String, schema_path: String) -> void:
+	if bound == null:
+		return
+	if not _is_number(bound):
+		_fail(context, path, schema_path + "/" + keyword, keyword, "%s must be a number" % keyword)
+		return
+	var difference: float = (number - float(bound)) * direction # above 0 when the value is on the allowed side
+	if difference < 0 or (is_exclusive and difference == 0):
+		var words: String = ("at least %s" if not is_exclusive else "more than %s") if direction > 0 else ("at most %s" if not is_exclusive else "less than %s")
+		_fail(context, path, schema_path + "/" + keyword, keyword, "must be %s, got %s" % [words % _short(bound), _short(number)])
 
 
 static func _check_string(context: _Context, text: String, schema: Dictionary, path: String, schema_path: String) -> void:
@@ -454,8 +481,8 @@ static func _check_object(context: _Context, object: Dictionary, schema: Diction
 			else:
 				_validate(context, object, dependency, base, path, schema_path + "/dependencies/" + _escape_pointer(name), depth + 1)
 
-	var properties: Variant = schema.get("properties", {})
-	var patterns: Variant = schema.get("patternProperties", {})
+	var properties: Variant = schema.get("properties", _NO_SCHEMAS)
+	var patterns: Variant = schema.get("patternProperties", _NO_SCHEMAS)
 	if not properties is Dictionary or not patterns is Dictionary:
 		_fail(context, path, schema_path, "properties", "properties and patternProperties must be objects")
 		return
@@ -484,7 +511,7 @@ static func _check_object(context: _Context, object: Dictionary, schema: Diction
 
 ## allOf, anyOf, oneOf, not and if / then / else.
 static func _check_combinations(context: _Context, data: Variant, schema: Dictionary, base: String, path: String, schema_path: String, depth: int) -> void:
-	for keyword: String in ["allOf", "anyOf", "oneOf"]:
+	for keyword: String in _COMBINING_KEYWORDS:
 		if not schema.has(keyword):
 			continue
 		var options: Variant = schema[keyword]
@@ -661,6 +688,8 @@ static func _to_godot_regex(pattern: String) -> String:
 
 ## A key as a JSON Pointer segment: "~" and "/" are escaped.
 static func _escape_pointer(key: String) -> String:
+	if not (key.contains("~") or key.contains("/")):
+		return key
 	return key.replace("~", "~0").replace("/", "~1")
 
 

@@ -312,8 +312,7 @@ static func _text_schema(type: int) -> Dictionary:
 ## VERY_SLOW as "Very Slow", written "Very_Slow"), and the same in capitals, as in the code (VERY_SLOW). Loading reads both.
 static func _enum_names(hint_string: String) -> Array:
 	var names: Array = []
-	for entry: String in hint_string.split(","):
-		var name: String = entry.replace(" ", "_").split(":")[0]
+	for name: String in _enum_values(hint_string):
 		for form: String in [name, name.to_upper()]:
 			if not form in names:
 				names.append(form)

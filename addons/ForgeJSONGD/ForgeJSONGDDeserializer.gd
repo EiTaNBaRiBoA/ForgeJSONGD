@@ -1,6 +1,9 @@
 ## JSON -> class conversion. Internal, use ForgeJSONGD instead.
 @abstract class_name ForgeJSONGDDeserializer extends ForgeJSONGDBase
 
+## Finds the numbers in the display text older versions wrote (compiled on first use, see _from_display_text).
+static var _number_regex: RegEx = null
+
 
 ## Fills a class instance from a JSON dictionary.
 ## script_or_instance can be a Script (a new instance is created), an existing instance,
@@ -25,10 +28,20 @@ static func json_to_class(script_or_instance: Variant, json: Dictionary) -> Obje
 		return Object.new()
 
 	# A class that returns true from _forge_plain_json() is read as plain JSON, and so is everything inside it.
+	# Nothing between switching plain on and back can stop this function: an error inside the call (a hook that
+	# returns the wrong type, for example) only ends that call, so plain never stays on for what is done next.
 	var was_plain: bool = _plain
 	if not _plain and _hook(target, "_forge_plain_json", false):
 		_plain = true
+	_fill_object(target, json)
+	_plain = was_plain
+	return target
 
+
+#region Internals
+
+## Assigns the values of a JSON dictionary to the variables of an object.
+static func _fill_object(target: Object, json: Dictionary) -> void:
 	# Index the settable properties by JSON key so each key in the JSON is a direct lookup.
 	var settable: Dictionary = _json_properties(target)
 
@@ -60,11 +73,6 @@ static func json_to_class(script_or_instance: Variant, json: Dictionary) -> Obje
 		if not _plain and value is String and settable[key].get("type") != TYPE_STRING and _is_safe_type(value):
 			value = str_to_var(value)
 		_assign_property(target, settable[key], value)
-	_plain = was_plain
-	return target
-
-
-#region Internals
 
 ## Creates the object for a script. The second item is true when the class built itself from the JSON
 ## with _forge_deserialize: a static method (GDScript) or, for C#, a method of the new instance.
@@ -175,10 +183,13 @@ static func _assign_simple(target: Object, property: Dictionary, value: Variant)
 
 ## Reads the display text older versions wrote for a few built-in types. Returns null if the text is not understood.
 static func _from_display_text(text: String, type: int) -> Variant:
-	var regex := RegEx.new()
-	regex.compile("-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?")
+	if not type in _TEXT_RENDERED_TYPES:
+		return null # only these types were ever written as display text
+	if _number_regex == null:
+		_number_regex = RegEx.new()
+		_number_regex.compile("-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?")
 	var n: PackedFloat64Array = []
-	for found: RegExMatch in regex.search_all(text):
+	for found: RegExMatch in _number_regex.search_all(text):
 		n.append(found.get_string().to_float())
 	match type:
 		TYPE_RECT2:
@@ -236,12 +247,12 @@ static func _from_display_text(text: String, type: int) -> Variant:
 static func _string_to_enum(value: Variant, hint_string: String) -> int:
 	if not value is String:
 		return int(value)
+	# Any mix of capitals, and "_" or a space between words: "Very_Fast", "VERY_FAST" and "very fast" are one name.
 	var wanted: String = value.to_lower().replace("_", " ")
-	for entry: String in hint_string.split(","):
-		if entry.contains(":"):
-			var keys: PackedStringArray = entry.split(":")
-			if keys[0].to_lower() == wanted:
-				return keys[1].to_int()
+	var values: Dictionary = _enum_values(hint_string)
+	for enum_name: String in values:
+		if enum_name.to_lower().replace("_", " ") == wanted:
+			return values[enum_name]
 	return 0
 
 

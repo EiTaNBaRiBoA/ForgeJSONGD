@@ -9,10 +9,12 @@
 static func class_to_json(_class: Object, specify_class: bool = false, owner: Object = null) -> Dictionary:
 	if _plain or not _hook(_class, "_forge_plain_json", false):
 		return _object_to_dictionary(_class, specify_class, owner)
+	# Nothing between switching plain on and off can stop this function: an error inside the call (a hook that returns
+	# the wrong type, for example) only ends that call, so plain never stays on for the saves that follow.
 	_plain = true
-	var result: Dictionary = _object_to_dictionary(_class, specify_class, owner)
+	var result: Variant = _object_to_dictionary(_class, specify_class, owner)
 	_plain = false
-	return result
+	return result if result is Dictionary else {}
 
 
 ## The variables of an object as a dictionary (see class_to_json).
@@ -146,7 +148,7 @@ static func _store_property(dictionary: Dictionary, property_name: String, prope
 
 ## Serializes an Object property: external resources by path, everything else as a nested dictionary.
 static func _serialize_object_property(property: Dictionary, value: Object, owner: Object) -> Variant:
-	if value is Resource and ResourceLoader.exists(value.resource_path):
+	if _is_file_resource(value):
 		# Resources stored in a file that isn't a .tres are referenced by path only, and so are classes that ask for it.
 		if _get_main_tres_path(value.resource_path).get_extension() != "tres" or _is_saved_by_path(value):
 			return value.resource_path
@@ -159,7 +161,7 @@ static func _serialize_object_property(property: Dictionary, value: Object, owne
 ## Serializes an Object inside a container: a resource from a file by its path, an object without a script as null.
 ## In an untyped place (mark_resource) the path is wrapped in a marker object, so loading knows it is a resource.
 static func _object_to_json(value: Object, specify_script: bool, mark_resource: bool = false, owner: Object = null) -> Variant:
-	if value is Resource and ResourceLoader.exists(value.resource_path):
+	if _is_file_resource(value):
 		if _get_main_tres_path(value.resource_path).get_extension() != "tres" or _is_saved_by_path(value):
 			return {_RESOURCE_PATH: value.resource_path} if mark_resource else value.resource_path
 	elif value.get_script() == null:
@@ -167,17 +169,13 @@ static func _object_to_json(value: Object, specify_script: bool, mark_resource: 
 	return class_to_json(value, specify_script, owner)
 
 
-## Returns the enum key matching the value from a property hint string ("A:0,B:1"), or null if none matches.
+## Returns the enum name matching the value from a property hint string (see _enum_values), or null if none matches.
 static func _enum_to_string(value: int, hint_string: String) -> Variant:
 	var result: Variant = null
-	for entry: String in hint_string.split(","):
-		entry = entry.replace(" ", "_")
-		if entry.contains(":"):
-			var parts: PackedStringArray = entry.split(":")
-			if value == parts[1].to_int():
-				result = parts[0]
-		else:
-			result = entry
+	var values: Dictionary = _enum_values(hint_string)
+	for enum_name: String in values:
+		if values[enum_name] == value:
+			result = enum_name # the last name wins when two names share a value
 	return result
 
 

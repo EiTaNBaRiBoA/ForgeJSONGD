@@ -29,29 +29,27 @@ static func json_to_class(script_or_instance: Variant, json: Dictionary) -> Obje
 	if not _plain and _hook(target, "_forge_plain_json", false):
 		_plain = true
 
-	# Index the settable properties by name so each JSON key is a direct lookup.
-	var excluded: Array = _hook(target, "_forge_excluded_properties", [])
-	var extra: Array = _hook(target, "_forge_extra_properties", [])
-	var settable: Dictionary = {}
-	for property: Dictionary in target.get_property_list():
-		var property_name: String = property.get("name")
-		if property_name != "script" and not property_name in excluded and (_check_valid_property(property) or property_name in extra):
-			settable[property_name] = property
+	# Index the settable properties by JSON key so each key in the JSON is a direct lookup.
+	var settable: Dictionary = _json_properties(target)
 
-	# Other keys a variable is read from: the key given by _forge_json_keys, and the old names in _forge_renamed_properties.
-	var json_keys: Dictionary = _hook(target, "_forge_json_keys", {})
-	var renamed: Dictionary = _hook(target, "_forge_renamed_properties", {})
-	var shadowed: Dictionary = {} # keys that are ignored because the preferred key of the same variable is in the JSON
-	for variable_name: String in json_keys:
-		if settable.has(variable_name):
-			settable[json_keys[variable_name]] = settable[variable_name]
-			if json.has(json_keys[variable_name]):
+	# Other keys a variable is read from: its own name when it has a _forge_json_keys key, and the old names in
+	# _forge_renamed_properties. They are ignored when the preferred key of the same variable is in the JSON.
+	var key_of: Dictionary = {} # variable name -> its JSON key
+	for json_key: String in settable.keys():
+		var variable_name: String = settable[json_key].name
+		key_of[variable_name] = json_key
+	var shadowed: Dictionary = {}
+	for variable_name: String in key_of:
+		if not settable.has(variable_name):
+			settable[variable_name] = settable[key_of[variable_name]]
+			if json.has(key_of[variable_name]):
 				shadowed[variable_name] = true
+	var renamed: Dictionary = _hook(target, "_forge_renamed_properties", {})
 	for old_name: String in renamed:
 		var current_name: String = renamed[old_name]
-		if settable.has(current_name) and not settable.has(old_name):
-			settable[old_name] = settable[current_name]
-			if json.has(json_keys.get(current_name, current_name)):
+		if key_of.has(current_name) and not settable.has(old_name):
+			settable[old_name] = settable[key_of[current_name]]
+			if json.has(key_of[current_name]):
 				shadowed[old_name] = true
 
 	for key: Variant in json:

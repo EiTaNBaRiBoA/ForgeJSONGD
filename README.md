@@ -1,6 +1,6 @@
 # ForgeJSONGD
 
-Save and load your Godot classes as JSON, in one line each. ForgeJSONGD turns any GDScript or C# class into a JSON dictionary (or file, optionally encrypted) and builds it back, including nested objects, arrays, dictionaries, enums, inheritance, and Godot types like `Vector2`, `Color` and `Transform3D`. It can also compare two JSON data sets, list their differences, and patch one with the other.
+Save and load your Godot classes as JSON, in one line each. ForgeJSONGD turns any GDScript or C# class into a JSON dictionary (or file, optionally encrypted) and builds it back, including nested objects, arrays, dictionaries, enums, inheritance, and Godot types like `Vector2`, `Color` and `Transform3D`. It can also validate JSON (your class is the schema, or any JSON Schema), compare two JSON data sets, list their differences, and patch one with the other.
 
 ## Guides
 
@@ -15,6 +15,7 @@ Save and load your Godot classes as JSON, in one line each. ForgeJSONGD turns an
   * **Files with optional encryption:** pass a key to `store_json_file` / `json_file_to_class`.
   * **Inheritance and polymorphism:** a child class stored in a parent-typed variable, array or dictionary comes back as the child. [Details](docs/GDScript-Tutorial.md#inheritance-and-polymorphism)
   * **JSON for web APIs:** add `func _forge_plain_json() -> bool: return true` to a data class and the normal functions write and read standard JSON for it, with the field names your API uses (`_forge_json_keys`). A server can never make a game create classes or load files. [Details](docs/GDScript-Tutorial.md#json-for-http-apis)
+  * **Validate JSON before you load it:** `validate_json(data, MyClass)` lists every problem with its place (`/address/city: expected string, got integer`). The class's variable types are the schema, and `_forge_schema` adds required fields, ranges, lengths and patterns. Standard JSON Schema (draft 2020-12) works too, and `class_to_json_schema` gives you a class's schema for a server or API docs. [Details](docs/GDScript-Tutorial.md#validating-json)
   * **Many types, automatically:** numbers, text, enums (saved by name), vectors, `Color`, `Rect2`, `AABB`, `Basis`, `Quaternion`, `Transform2D/3D`, `Plane`, `Projection`, packed arrays, `NodePath`, typed and untyped arrays and dictionaries, resources, `Variant`. [Type table](docs/GDScript-Tutorial.md#what-is-saved-and-how)
   * **Customizable classes:** skip variables, pass constructor arguments, or take over saving and loading with optional `_forge_` methods. [Details](docs/GDScript-Tutorial.md#customizing-a-class)
   * **Safe loading of untrusted files:** optionally allow only registered scripts. [Details](docs/GDScript-Tutorial.md#security)
@@ -87,18 +88,21 @@ All methods are static: call them as `ForgeJSONGD.method(...)`.
 | `check_equal_jsons(first, second) -> bool` | Are two JSON sources the same data |
 | `compare_jsons_diff(first, second) -> Dictionary` | What changed between two JSON sources |
 | `json_operation(base, reference, operation) -> Dictionary` | Patch one JSON source with another |
+| `validate_json(json, schema) -> Array[Dictionary]` | The problems of JSON data against a class or a JSON Schema (empty when valid) |
+| `class_to_json_schema(script) -> Dictionary` | The JSON Schema of a class's JSON |
 | `register_script_alias(script, alias, save_as = true)`, `clear_script_aliases()` | Stable names for classes, so renames do not break saves |
 | `register_script(script)`, `register_scripts(scripts)`, `clear_registered_scripts()` | Optional allow-list of scripts |
 | `convert_array_to_json(array)`, `convert_dictionary_to_json(dictionary)` | Convert containers on their own |
 
 Settings: `ForgeJSONGD.only_exported_values` (default `false`), `ForgeJSONGD.json_indent` (default tab), `ForgeJSONGD.sort_keys` (default `true`). Enum: `ForgeJSONGD.Operation`.
 
-Optional methods a class can define (all start with `_forge_`): `_forge_excluded_properties`, `_forge_extra_properties`, `_forge_json_keys`, `_forge_renamed_properties`, `_forge_plain_json`, `_forge_save_by_path`, `_forge_constructor_args`, `_forge_serialize`, `_forge_deserialize`. See [Customizing a class](docs/GDScript-Tutorial.md#customizing-a-class).
+Optional methods a class can define (all start with `_forge_`): `_forge_excluded_properties`, `_forge_extra_properties`, `_forge_json_keys`, `_forge_renamed_properties`, `_forge_plain_json`, `_forge_save_by_path`, `_forge_constructor_args`, `_forge_schema`, `_forge_serialize`, `_forge_deserialize`. See [Customizing a class](docs/GDScript-Tutorial.md#customizing-a-class).
 
 ## Important notes
 
   * **What is saved:** GDScript saves every script variable by default; set `ForgeJSONGD.only_exported_values = true` to save only `@export` / `@export_storage` variables. C# saves only `[Export]` members.
   * **Errors:** saving returns `false` on failure; loading a missing file returns a new instance (or `{}` for a dictionary); invalid JSON text returns `null`. See [error handling](docs/GDScript-Tutorial.md#error-handling).
   * **Web APIs:** mark the data classes you send to or receive from an API with `_forge_plain_json`. Without it the format is the exact one made for save files, with class names and markers that an API does not expect.
+  * **Loading is forgiving, validation is strict:** loading reads `"5"` into an `int` and skips what does not fit; `validate_json` reports it. Validation never changes saving or loading.
   * **Security:** encrypt files with a key to protect them from editing, and register the allowed scripts if files can come from other people. See [security](docs/GDScript-Tutorial.md#security).
   * **Exact data:** ints stay ints (also above 2^53), floats keep every digit, text stays text, and dictionary keys keep their type. See [how](docs/GDScript-Tutorial.md#numbers-text-and-keys-stay-exact).

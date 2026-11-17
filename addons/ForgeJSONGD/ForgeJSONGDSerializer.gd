@@ -27,22 +27,11 @@ static func _object_to_dictionary(_class: Object, specify_class: bool, owner: Ob
 		dictionary.merge(convert_dictionary_to_json(_class._forge_serialize(), _class), true)
 		return dictionary
 
-	var excluded: Array = _hook(_class, "_forge_excluded_properties", [])
-	var extra: Array = _hook(_class, "_forge_extra_properties", [])
-	for property: Dictionary in _class.get_property_list():
-		var property_name: String = property.get("name")
-		if property_name == "script" or property_name.is_empty() or property_name in excluded:
-			continue
-		if _check_valid_property(property) or property_name in extra:
-			_store_property(dictionary, property, _class.get(property_name), _class)
-
-	# Variables can be written under another key (camelCase names of an API, for example).
-	var json_keys: Dictionary = _hook(_class, "_forge_json_keys", {})
-	if not json_keys.is_empty():
-		var renamed: Dictionary = {} # rebuilt in the same order, so sort_keys = false still follows the variables
-		for key: Variant in dictionary:
-			renamed.set(json_keys.get(key, key), dictionary[key])
-		dictionary = renamed
+	# Each variable under its JSON key (its name, or the key given by _forge_json_keys), in the order of the class.
+	var properties: Dictionary = _json_properties(_class)
+	for json_key: String in properties:
+		var property: Dictionary = properties[json_key]
+		_store_property(dictionary, json_key, property, _class.get(property.name), _class)
 
 	if _class.has_method("_forge_constructor_args") and not _plain:
 		dictionary.set(CONSTRUCTOR_ARGS, convert_array_to_json(_class._forge_constructor_args(), _class))
@@ -123,9 +112,8 @@ static func _get_script_reference(script: Script, owner: Object = null) -> Strin
 	return ""
 
 
-## Serializes one property value into the dictionary, depending on its type.
-static func _store_property(dictionary: Dictionary, property: Dictionary, value: Variant, owner: Object) -> void:
-	var property_name: String = property.get("name")
+## Serializes one property value into the dictionary under property_name (its JSON key), depending on its type.
+static func _store_property(dictionary: Dictionary, property_name: String, property: Dictionary, value: Variant, owner: Object) -> void:
 	var property_type: Variant = property.get("type")
 
 	if value is Array:

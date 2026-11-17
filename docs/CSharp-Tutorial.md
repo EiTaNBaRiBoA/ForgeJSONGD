@@ -17,10 +17,11 @@ Tested with the Godot 4.7.2 .NET build, targeting `net8.0`.
 7. [Customizing a class from C#](#customizing-a-class-from-c)
 8. [Security and the script registry](#security-and-the-script-registry)
 9. [JSON for HTTP APIs](#json-for-http-apis)
-10. [Comparing and patching JSON](#comparing-and-patching-json)
-11. [Calling the addon without the wrapper](#calling-the-addon-without-the-wrapper)
-12. [Building and running](#building-and-running)
-13. [Limits and troubleshooting](#limits-and-troubleshooting)
+10. [Validating JSON](#validating-json)
+11. [Comparing and patching JSON](#comparing-and-patching-json)
+12. [Calling the addon without the wrapper](#calling-the-addon-without-the-wrapper)
+13. [Building and running](#building-and-running)
+14. [Limits and troubleshooting](#limits-and-troubleshooting)
 
 ---
 
@@ -204,6 +205,23 @@ public static class Forge
 	public static Dictionary JsonOperation(Variant baseJson, Variant referenceJson, Operation operation) =>
 		Addon.Call("json_operation", baseJson, referenceJson, (int)operation).As<Dictionary>();
 
+	// --- Validation ---
+
+	/// <summary>
+	/// Checks JSON data against a JSON Schema and returns the problems found (empty when the data is valid).
+	/// The data can be a Dictionary, an Array, JSON text, a file path or an object; the schema a Dictionary, JSON text or a file path.
+	/// </summary>
+	public static Array<Dictionary> ValidateJson(Variant json, Variant schema) =>
+		Addon.Call("validate_json", json, schema).AsGodotArray<Dictionary>();
+
+	/// <summary>Checks JSON data against the schema of a C# class (see ClassToJsonSchema).</summary>
+	public static Array<Dictionary> ValidateJson<[MustBeVariant] T>(Variant json) where T : GodotObject, new() =>
+		Addon.Call("validate_json", json, ScriptOf<T>.Value).AsGodotArray<Dictionary>();
+
+	/// <summary>The JSON Schema of the JSON that ClassToJson writes for a C# class, with the rules from its _forge_schema.</summary>
+	public static Dictionary ClassToJsonSchema<[MustBeVariant] T>() where T : GodotObject, new() =>
+		Addon.Call("class_to_json_schema", ScriptOf<T>.Value).As<Dictionary>();
+
 	// --- Script registry and aliases ---
 
 	public static void RegisterScript(Script script) => Addon.Call("register_script", script);
@@ -346,6 +364,7 @@ The optional `_forge_` methods work from C#. Godot finds them by their **exact n
 | `public bool _forge_plain_json()` | Return `true` for a class that talks to a web API: it is written and read as [standard JSON](GDScript-Tutorial.md#json-for-http-apis). |
 | `public bool _forge_save_by_path()` | For `Resource` classes: a resource from a file is saved as its path. |
 | `public Godot.Collections.Array _forge_constructor_args()` | Arguments passed to a constructor on load. |
+| `public Godot.Collections.Dictionary _forge_schema()` | JSON Schema rules for [validation](#validating-json), by C# member name or JSON key. |
 | `public Godot.Collections.Dictionary _forge_serialize()` | Replaces the automatic saving. |
 | `public GodotObject _forge_deserialize(Godot.Collections.Dictionary json)` | **Instance** method that receives the JSON and returns the finished object (C# cannot use the static form). |
 
@@ -484,6 +503,58 @@ Things that are specific to C#:
 * **Initialize members that hold a class** (`= new()`). A server's data cannot say which class to create, and Godot does not report the declared class of a C# object member, so loading fills the object that is already there (and keeps its class). A member that is `null` stays `null`.
 * The nested `AddressData` does not need `_forge_plain_json`: everything inside a plain class is plain.
 * A class name in a server's data (`"script_inheritance"`) is ignored. Nothing is created or loaded because a server asked for it.
+
+---
+
+## Validating JSON
+
+`ValidateJson` checks data before you load it and lists every problem with its place. The C# class is the schema: its member types are the rules, and `_forge_schema` adds required fields, ranges, lengths and patterns in JSON Schema words. How it works, what a class schema checks and which keywords are supported is in [Validating JSON](GDScript-Tutorial.md#validating-json).
+
+```csharp
+// SignupData.cs: a request body with validation rules (by C# member name).
+[GlobalClass]
+public partial class SignupData : GodotObject
+{
+	[Export] public string UserName { get; set; } = "";
+	[Export] public int Age { get; set; }
+	[Export] public Godot.Collections.Array<string> Tags { get; set; } = new();
+	[Export] public AddressData Address { get; set; } = new();
+
+	public bool _forge_plain_json() => true;
+
+	public Godot.Collections.Dictionary _forge_json_keys() => new() { { "UserName", "userName" }, { "Age", "age" }, { "Tags", "tags" }, { "Address", "address" } };
+
+	// JSON Schema rules, added to what the member types already say.
+	public Godot.Collections.Dictionary _forge_schema() => new()
+	{
+		{ "required", new Godot.Collections.Array { "UserName" } },
+		{ "properties", new Godot.Collections.Dictionary
+			{
+				{ "UserName", new Godot.Collections.Dictionary { { "minLength", 3 } } },
+				{ "Age", new Godot.Collections.Dictionary { { "minimum", 13 } } },
+			}
+		},
+	};
+}
+```
+
+```csharp
+var errors = Forge.ValidateJson<SignupData>("{\"userName\":\"an\",\"age\":5,\"tags\":[1],\"address\":{\"city\":2}}");
+foreach (var error in errors)
+	GD.Print(error["path"], ": ", error["message"]);
+// /userName: must be at least 3 characters long, got 2
+// /age: must be at least 13, got 5
+// /tags/0: expected string, got integer
+// /address/city: expected string, got integer
+
+if (Forge.ValidateJson<SignupData>(responseText).Count == 0)
+	signup = Forge.JsonStringToClass<SignupData>(responseText);
+```
+
+* `ValidateJson<T>(json)` checks against the class `T`; `ValidateJson(json, schema)` against a JSON Schema given as a `Godot.Collections.Dictionary`, JSON text or a file path. The data can be a `Godot.Collections.Dictionary`, an array, JSON text, a file path or an object.
+* Each problem is a dictionary with `"path"` (`"/address/city"`), `"keyword"` (`"type"`), `"message"` and `"schema_path"`. An empty array means valid.
+* `Forge.ClassToJsonSchema<T>()` returns the schema of a class (JSON Schema draft 2020-12), for a server, API docs or other tools. Its keys are the JSON keys, and `"required"` member names are turned into JSON keys too.
+* Members that hold a class are initialized (`= new()`), as for loading: Godot does not report the declared class of a C# object member, so the schema uses the class of the object the member holds.
 
 ---
 

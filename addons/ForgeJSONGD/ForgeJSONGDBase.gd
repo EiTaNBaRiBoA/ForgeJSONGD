@@ -88,6 +88,9 @@ static var _global_class_paths: Dictionary = {}
 ## Scripts allowed to be created from names/paths found in JSON. Empty means any script is allowed.
 static var _registered_scripts: Array[Script] = []
 
+## Finds the "\v" escape that _stringify replaces (compiled on first use).
+static var _vertical_tab_escape: RegEx = null
+
 
 #region Files
 
@@ -111,9 +114,20 @@ static func _write_json_file(file_path: String, data: Dictionary, security_key: 
 	if not file:
 		printerr("Error writing to a file")
 		return false
-	file.store_string(JSON.stringify(data, json_indent, sort_keys, true)) # full_precision: floats keep every digit
+	file.store_string(_stringify(data, json_indent, sort_keys))
 	file.close()
 	return true
+
+
+## JSON.stringify, with full precision by default (floats keep every digit), fixed so the text is always valid JSON:
+## Godot writes a vertical tab (character 11) as "\v", which JSON does not have and Godot's own parser rejects.
+static func _stringify(data: Variant, indent: String = "", sort: bool = true, full_precision: bool = true) -> String:
+	var text: String = JSON.stringify(data, indent, sort, full_precision)
+	if not text.contains("\\v"):
+		return text
+	if _vertical_tab_escape == null:
+		_vertical_tab_escape = RegEx.create_from_string("(?<!\\\\)((?:\\\\\\\\)*)\\\\v") # "\v" not preceded by an escaped backslash
+	return _vertical_tab_escape.sub(text, "$1\\u000b", true)
 
 
 ## Reads a JSON file into a Dictionary. Returns an empty Dictionary on any failure.
@@ -145,6 +159,23 @@ static func _read_json_file(file_path: String, security_key: String = "") -> Dic
 ## Checks if a property should be included during serialization or deserialization.
 static func _check_valid_property(property: Dictionary) -> bool:
 	return property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE and (not only_exported_values or property.usage & PROPERTY_USAGE_STORAGE)
+
+
+## The variables of an object that are written to and read from JSON, by the key each one uses in the JSON
+## (_forge_json_keys), in the order of the class. Leaves out excluded variables and adds the extra properties.
+## Shared by saving, loading and class_to_json_schema, so the three always agree.
+static func _json_properties(object: Object) -> Dictionary:
+	var excluded: Array = _hook(object, "_forge_excluded_properties", [])
+	var extra: Array = _hook(object, "_forge_extra_properties", [])
+	var json_keys: Dictionary = _hook(object, "_forge_json_keys", {})
+	var properties: Dictionary = {}
+	for property: Dictionary in object.get_property_list():
+		var property_name: String = property.get("name")
+		if property_name == "script" or property_name.is_empty() or property_name in excluded:
+			continue
+		if _check_valid_property(property) or property_name in extra:
+			properties[json_keys.get(property_name, property_name)] = property
+	return properties
 
 
 ## Returns true if the value is one of the six vector types.
@@ -350,7 +381,7 @@ static func _get_dict_from_type(json: Variant) -> Dictionary:
 ## Converts data to what it would be after being saved and loaded again: numbers become floats,
 ## keys are sorted and text-like values become strings. Makes data from files and classes comparable.
 static func _normalize_json(data: Variant) -> Variant:
-	return JSON.parse_string(JSON.stringify(data))
+	return JSON.parse_string(_stringify(data, "", true, false))
 
 
 ## Checks if two dictionaries hold the same JSON data, ignoring key order and int/float differences.

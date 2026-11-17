@@ -1,5 +1,6 @@
 ## Public API of the ForgeJSONGD addon. Every method here is static and a thin wrapper:
-## the actual work lives in ForgeJSONGDSerializer, ForgeJSONGDDeserializer and ForgeJSONGDHelper.
+## the actual work lives in ForgeJSONGDSerializer, ForgeJSONGDDeserializer, ForgeJSONGDHelper, ForgeJSONGDValidator
+## and ForgeJSONGDSchema.
 ##
 ## Settings (inherited from ForgeJSONGDBase):
 ##   ForgeJSONGD.only_exported_values - serialize only @export variables when true.
@@ -17,6 +18,8 @@
 ##   func _forge_plain_json() -> bool             - return true for a class that talks to a web API: it is written and read as
 ##                                                  standard JSON (no class names, markers or prefixes; nothing in the data is interpreted).
 ##   func _forge_constructor_args() -> Array      - arguments for _init, stored and passed again on load.
+##   func _forge_schema() -> Dictionary           - JSON Schema rules for validate_json and class_to_json_schema, added to
+##                                                  what the variable types already say: {"required": [...], "properties": {"age": {"minimum": 0}}}.
 ##   func _forge_serialize() -> Dictionary        - replaces the automatic serialization of the class.
 ##   static func _forge_deserialize(json: Dictionary) -> Object - builds the instance from that dictionary.
 @abstract class_name ForgeJSONGD extends ForgeJSONGDBase
@@ -32,7 +35,7 @@ static func class_to_json(_class: Object, specify_class: bool = false) -> Dictio
 
 ## Converts a class instance into a JSON string.
 static func class_to_json_string(_class: Object, specify_class: bool = false) -> String:
-	return JSON.stringify(class_to_json(_class, specify_class), "", sort_keys, true) # full_precision: floats keep every digit
+	return _stringify(class_to_json(_class, specify_class), "", sort_keys)
 
 
 ## Stores a JSON dictionary to a file, encrypted when a security_key is given. Returns false on failure.
@@ -106,6 +109,24 @@ static func json_operation(base_json: Variant, ref_json: Variant, operation_type
 #endregion
 
 
+#region Validation
+
+## Checks JSON data against a schema and returns the problems found; an empty array means the data is valid.
+## Each problem is {"path": "/address/zip", "message": "expected string, got integer", "keyword": "type", "schema_path": "..."}.
+## json: a Dictionary, Array or other JSON value, JSON text, a JSON file path, or an object (checked as its class_to_json).
+## schema: a Script (the class is the schema, see class_to_json_schema), or a JSON Schema as a Dictionary, JSON text or file path.
+static func validate_json(json: Variant, schema: Variant) -> Array[Dictionary]:
+	return ForgeJSONGDValidator.validate(json, schema)
+
+
+## The JSON Schema (draft 2020-12) of the JSON that class_to_json writes for the class: its variable types,
+## plus the rules from its _forge_schema(). Give it to a server, to API docs, or to validate_json.
+static func class_to_json_schema(script: Script) -> Dictionary:
+	return ForgeJSONGDSchema.class_to_json_schema(script)
+
+#endregion
+
+
 #region Script registry (optional safety)
 ## By default any script can be created from the script name/path stored in a JSON file.
 ## Once at least one script is registered, only registered scripts are created from JSON data
@@ -142,12 +163,14 @@ static func register_script_alias(script: Script, alias: String, save_as: bool =
 	_script_aliases[alias] = script
 	if save_as:
 		_alias_of[script] = alias
+	ForgeJSONGDSchema._clear_cache() # aliases are part of generated schemas
 
 
 ## Removes every alias.
 static func clear_script_aliases() -> void:
 	_script_aliases.clear()
 	_alias_of.clear()
+	ForgeJSONGDSchema._clear_cache()
 
 #endregion
 

@@ -6,21 +6,22 @@ This guide covers everything ForgeJSONGD can do from GDScript. Using C#? Read th
 
 1. [Your first save and load](#your-first-save-and-load)
 2. [JSON for HTTP APIs](#json-for-http-apis)
-3. [What is saved, and how](#what-is-saved-and-how)
-4. [Method reference](#method-reference)
-5. [Settings](#settings)
-6. [Inheritance and polymorphism](#inheritance-and-polymorphism)
-7. [Customizing a class](#customizing-a-class)
-8. [Keeping saves working over time](#keeping-saves-working-over-time)
-9. [Built-in types in `Variant` and untyped containers](#built-in-types-in-variant-and-untyped-containers)
-   * [Numbers, text and keys stay exact](#numbers-text-and-keys-stay-exact)
-10. [Enums](#enums)
-11. [Resources](#resources)
-12. [Security](#security)
-13. [Comparing and patching JSON](#comparing-and-patching-json)
-14. [Error handling](#error-handling)
-15. [Limits and things to know](#limits-and-things-to-know)
-16. [Troubleshooting](#troubleshooting)
+3. [Validating JSON](#validating-json)
+4. [What is saved, and how](#what-is-saved-and-how)
+5. [Method reference](#method-reference)
+6. [Settings](#settings)
+7. [Inheritance and polymorphism](#inheritance-and-polymorphism)
+8. [Customizing a class](#customizing-a-class)
+9. [Keeping saves working over time](#keeping-saves-working-over-time)
+10. [Built-in types in `Variant` and untyped containers](#built-in-types-in-variant-and-untyped-containers)
+    * [Numbers, text and keys stay exact](#numbers-text-and-keys-stay-exact)
+11. [Enums](#enums)
+12. [Resources](#resources)
+13. [Security](#security)
+14. [Comparing and patching JSON](#comparing-and-patching-json)
+15. [Error handling](#error-handling)
+16. [Limits and things to know](#limits-and-things-to-know)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -183,7 +184,191 @@ If the receiver needs the real class, use a class that is not plain (it keeps th
 
 ### Reading data you do not trust
 
-Always pass the class you expect: `json_to_class(UserDto, data)`. With `null` as the class (`json_to_class(null, data)`) the class is taken from the data itself, which is what you want for your own save files and never for data from outside. Even then, the [allow-list](#security) limits what can be created. Constructor arguments stored in the data are only used by a class that defines `_forge_constructor_args`.
+Always pass the class you expect: `json_to_class(UserDto, data)`. With `null` as the class (`json_to_class(null, data)`) the class is taken from the data itself, which is what you want for your own save files and never for data from outside. Even then, the [allow-list](#security) limits what can be created. Constructor arguments stored in the data are only used by a class that defines `_forge_constructor_args`. To find out what is wrong with data before loading it, [validate it](#validating-json).
+
+---
+
+## Validating JSON
+
+Loading is forgiving on purpose: `"20"` fills an `int`, a missing field keeps its default, a field of the wrong shape is skipped. That keeps games running, but it also hides mistakes. `validate_json` checks data and tells you exactly what is wrong and where, without loading anything. It uses **JSON Schema** (draft 2020-12), the standard way to describe JSON, in two ways:
+
+* **The class is the schema.** Pass a class: its variable types are the rules, and `_forge_schema` adds what types cannot say (required fields, ranges, lengths, patterns).
+* **A JSON Schema you write or receive.** Pass the schema as a dictionary, JSON text or a file, for example the one an API publishes.
+
+Validation changes nothing about saving and loading.
+
+### The class is the schema
+
+```gdscript
+# address_dto.gd
+class_name AddressDto
+
+var city: String = ""
+var zip: String = ""
+```
+
+```gdscript
+# signup_dto.gd
+class_name SignupDto
+
+var user_name: String = ""
+var email: String = ""
+var age: int = 0
+var tags: Array[String] = []
+var address: AddressDto
+
+
+func _forge_plain_json() -> bool:
+	return true
+
+
+func _forge_json_keys() -> Dictionary:
+	return {"user_name": "userName"}
+
+
+# Rules the types cannot say, in JSON Schema words. Use variable names or JSON keys.
+func _forge_schema() -> Dictionary:
+	return {
+		"required": ["user_name", "email"],
+		"properties": {
+			"user_name": {"minLength": 3, "maxLength": 20},
+			"email": {"pattern": "^[^@\\s]+@[^@\\s]+$"},
+			"age": {"minimum": 13},
+			"tags": {"maxItems": 5, "uniqueItems": true},
+		},
+	}
+```
+
+```gdscript
+var text := '{"userName": "an", "email": "ann.example.com", "age": "20", "address": {"city": 5}}'
+var errors: Array[Dictionary] = ForgeJSONGD.validate_json(text, SignupDto)
+for error in errors:
+	print(error.path, ": ", error.message)
+# /userName: must be at least 3 characters long, got 2
+# /email: must match the pattern "^[^@\\s]+@[^@\\s]+$", got "ann.example.com"
+# /age: expected integer, got string
+# /address/city: expected string, got integer
+```
+
+Validate first, then load:
+
+```gdscript
+var problems := ForgeJSONGD.validate_json(text, SignupDto)
+if problems.is_empty():
+	var signup: SignupDto = ForgeJSONGD.json_string_to_class(SignupDto, text)
+else:
+	push_warning("Bad signup data: %s" % problems[0].message)
+```
+
+**What the class says without any rule:**
+
+* **The type of every variable,** under its JSON key (`_forge_json_keys`). Excluded variables are not listed and `_forge_extra_properties` are. `int` is an integer (`20.0` counts, JSON has one number type), `float` a number, `String` text, `bool` true or false, an enum one of its names (`"Admin"`, or `"ADMIN"` as in the code: loading reads both).
+* **Inside arrays and dictionaries:** every element of `Array[String]`, `Dictionary[String, int]` and so on. A problem names the element: `/tags/1`.
+* **Objects:** a variable that holds a class is checked against that class, and may be `null`. A `Resource` may also be the path of its file.
+* **Godot types in their JSON form:** a `Vector2` is `{"x": .., "y": ..}` in a plain class and `"Vector2(1, 2)"` in a save file, a `Color` is hex text, `Rect2` and the others are their text form. See [What is saved, and how](#what-is-saved-and-how).
+* **Save files** (classes that are not plain): an `int` may be text (above 2^53), and an object that names a child class with `"script_inheritance"` is checked against that child class too (child classes with a `class_name`).
+* **Open by default, like loading:** missing fields and fields the class does not have are fine, `Variant` and untyped containers hold anything, and a class with `_forge_serialize` can hold anything.
+* `only_exported_values` is followed.
+
+**The rules of `_forge_schema`** use JSON Schema keywords (listed [below](#json-schema-keywords)):
+
+* `"properties"`: rules for a variable, added to its type. A keyword you give replaces the generated one: `"address": {"type": "object"}` means the address may not be `null`.
+* `"required"`: the fields that must be present.
+* Anything else is added to the class as it is: `"additionalProperties": false` refuses fields the class does not have, `"minProperties"`, `"description"`...
+
+In a plain class, a child class object is checked against the declared class: its own fields are extra fields, allowed unless the class sets `"additionalProperties": false`.
+
+### Getting the schema of a class
+
+`class_to_json_schema` returns the schema a class is checked with. Give it to the people who write the server, put it in API docs, or use it in other JSON Schema tools:
+
+```gdscript
+var schema: Dictionary = ForgeJSONGD.class_to_json_schema(SignupDto)
+ForgeJSONGD.store_json_file("user://signup.schema.json", schema)
+```
+
+```jsonc
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "urn:forgejsongd:SignupDto",
+	"$ref": "#/$defs/SignupDto",
+	"type": "object",
+	"$defs": {
+		"SignupDto": {
+			"title": "SignupDto",
+			"required": ["userName", "email"],
+			"properties": {
+				"userName": {"type": "string", "minLength": 3, "maxLength": 20},
+				"age": {"type": "integer", "minimum": 13},
+				"tags": {"type": "array", "items": {"type": "string"}, "maxItems": 5, "uniqueItems": true},
+				"address": {"type": ["object", "null"], "$ref": "#/$defs/AddressDto"},
+				// ...
+			}
+		},
+		"AddressDto": {"title": "AddressDto", "properties": {"city": {"type": "string"}, "zip": {"type": "string"}}}
+	}
+}
+```
+
+Every class it uses is in `"$defs"`, also a class that contains itself. A class schema can go inside another schema, for example for a list of objects:
+
+```gdscript
+var list_schema := {"type": "array", "items": ForgeJSONGD.class_to_json_schema(SignupDto)}
+ForgeJSONGD.validate_json(response_text, list_schema) # problems are named /1/userName...
+```
+
+### A JSON Schema you write or receive
+
+```gdscript
+var level_schema := {
+	"type": "object",
+	"required": ["name"],
+	"properties": {
+		"name": {"type": "string"},
+		"level": {"type": "integer", "minimum": 1},
+	},
+}
+ForgeJSONGD.validate_json({"level": 0}, level_schema)
+# [{"path": "", "keyword": "required", "message": "the property 'name' is required", "schema_path": "/required"},
+#  {"path": "/level", "keyword": "minimum", "message": "must be at least 1, got 0", "schema_path": "/properties/level/minimum"}]
+```
+
+### What `validate_json` takes and returns
+
+`validate_json(json, schema) -> Array[Dictionary]`
+
+* `json`: a `Dictionary`, an `Array` or any other JSON value, JSON text, a JSON file path, or an object (checked as its `class_to_json`, what would be saved or sent). A lone string is read as JSON text or a file path, so pass it as JSON text: `'"hello"'`. `NodePath`, `StringName` and packed arrays are checked as the text and arrays JSON makes of them.
+* `schema`: a class (`SignupDto`), an object (its class), or a JSON Schema as a `Dictionary`, `true` / `false`, JSON text or a file path. Encrypted files: read them with `json_file_to_dict(path, key)` and pass the dictionary.
+* The result lists every problem, not only the first; empty means valid. Each problem is a dictionary:
+  * `"path"`: where in the data, as a JSON Pointer: `"/address/city"`, `"/tags/1"`, `""` for the whole data. (`/` and `~` inside a key are written `~1` and `~0`.)
+  * `"keyword"`: the rule that failed: `"type"`, `"required"`, `"minimum"`...
+  * `"message"`: what was expected and what came.
+  * `"schema_path"`: where the rule is in the schema.
+* Data or a schema that cannot be read is reported as a problem with the keyword `"json"`; a schema that is not an object or a boolean as `"schema"`; a keyword with a wrong value (`"minimum": "5"`, a pattern that is not a regular expression) under that keyword.
+
+### JSON Schema keywords
+
+| | Keywords |
+|---|---|
+| Any value | `type`, `enum`, `const` |
+| Numbers | `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` |
+| Text | `minLength`, `maxLength` (in characters), `pattern` |
+| Arrays | `items`, `prefixItems`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains` |
+| Objects | `properties`, `required`, `additionalProperties`, `patternProperties`, `propertyNames`, `minProperties`, `maxProperties`, `dependentRequired`, `dependentSchemas` |
+| Combining | `allOf`, `anyOf`, `oneOf`, `not`, `if` / `then` / `else` |
+| Reuse | `$ref` and `$defs` inside the schema, `$id`, `$anchor` |
+| Older drafts | `definitions`, `dependencies`, `items` as a list with `additionalItems`, `exclusiveMinimum` / `exclusiveMaximum` as `true` / `false` |
+
+* **Notes only:** `title`, `description`, `default`, `examples`, `$comment`, `deprecated`, `readOnly`, `writeOnly`, `format`, `contentMediaType`... describe the data but check nothing. That is the standard: in draft 2020-12 `format` (`"email"`, `"date-time"`...) is a note unless a tool chooses to check it. Use `pattern` to check the form of text. Keywords JSON Schema does not know (`"x-my-tag"`) are ignored too, as the standard says.
+* **Not supported, and reported:** `unevaluatedProperties`, `unevaluatedItems`, `$dynamicRef`, `$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor`. A schema that uses one gets a problem saying so, so nothing passes unchecked.
+* **Nothing is loaded:** a `$ref` to another file or a URL is reported, never fetched.
+* **Tested against the standard:** the validator passes every required test of the official [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) for draft 2020-12 that uses these keywords (1,200 tests; run them with `run_tests.ps1 -SchemaSuite <folder>` in the test project).
+
+**Regular expressions** (`pattern`, `patternProperties`) are JavaScript (ECMA-262) expressions in JSON Schema. Godot's are PCRE2, which reads the usual ones the same way. ForgeJSONGD translates the parts that differ: `\s` also matches Unicode spaces, `\p{Letter}` and the other long Unicode category names, and `é`.
+
+**Numbers:** Godot's JSON parser reads every number as a double, so a number with more than about 16 significant digits is compared at that precision.
+
+**Untrusted schemas:** a schema can do nothing but check, and nothing is loaded. Godot's regular expressions have no time limit, though, so a pattern written to be slow would be slow. Check data from outside against your own schemas or classes.
 
 ---
 
@@ -279,6 +464,16 @@ File to dictionary. Returns `{}` when the file is missing, is not valid JSON, or
 ### Plain JSON for web APIs
 
 There are no separate functions: a class that returns `true` from `_forge_plain_json` is written and read as standard JSON by the functions above. See [JSON for HTTP APIs](#json-for-http-apis).
+
+### Validating
+
+#### `validate_json(json: Variant, schema: Variant) -> Array[Dictionary]`
+
+Checks data against a class or a JSON Schema and returns the problems found (empty when valid). See [Validating JSON](#validating-json).
+
+#### `class_to_json_schema(script: Script) -> Dictionary`
+
+The JSON Schema of the JSON that `class_to_json` writes for the class, with the rules of its `_forge_schema`. See [Getting the schema of a class](#getting-the-schema-of-a-class).
 
 ### Script registry
 
@@ -426,6 +621,7 @@ A class can define any of these optional methods. They all start with `_forge_`,
 | `func _forge_plain_json() -> bool` | Return `true` for a class that talks to a web API: it is written and read as [standard JSON](#json-for-http-apis). |
 | `func _forge_save_by_path() -> bool` | For `Resource` classes: a resource that comes from a file is saved as its path. |
 | `func _forge_constructor_args() -> Array` | Arguments for `_init`. They are saved, and passed to `_init` again on load. Needed when `_init` has required parameters. |
+| `func _forge_schema() -> Dictionary` | JSON Schema rules for [validation](#validating-json), added to what the variable types say: `{"required": [...], "properties": {"age": {"minimum": 0}}}`. |
 | `func _forge_serialize() -> Dictionary` | Replaces the automatic saving of the class with your own dictionary. |
 | `static func _forge_deserialize(json: Dictionary) -> Object` | Builds the object from that dictionary. Use together with `_forge_serialize`. |
 
@@ -785,6 +981,8 @@ Typical uses: apply a patch to saved data (`Replace` or `AddDiffer`), merge sett
 | The JSON names an unknown or unregistered script | the declared type of the variable is used, or plain data in untyped places |
 | A key in the JSON that the class does not have | ignored |
 | A variable missing from the JSON | keeps its default |
+| `validate_json` with data or a schema that cannot be read | one problem with the keyword `"json"` |
+| `validate_json` with a schema keyword it does not support | one problem with that keyword (nothing passes unchecked) |
 
 A robust load looks like this:
 
@@ -825,3 +1023,7 @@ else:
 | `json_file_to_dict` returns `{}` | The file is missing, not valid JSON, or the key is wrong or missing for an encrypted file. |
 | Loading an object whose `_init` needs arguments gives a plain `Object` and an error | Add `_forge_constructor_args`, or give the parameters default values. |
 | `check_equal_jsons` says different for data that looks the same | Array order differs, or a value differs in type (`"1"` text vs `1` number). Key order and `1` vs `1.0` never matter. |
+| `validate_json` reports `"5"` for an `int` although it loads | Validation is strict on purpose: it says what is wrong with the data. Loading reads `"5"` anyway. |
+| `validate_json` says a lone string is neither JSON nor a file | Pass it as JSON text: `'"hello"'`. |
+| `validate_json` accepts any `format` (`"email"`...) | In JSON Schema 2020-12 `format` is a note. Use `pattern`. |
+| A child class's own fields are not checked in a plain class | Plain JSON names no class, so the declared class is used. Set `"additionalProperties": false`, or use a save-file class. |

@@ -509,7 +509,7 @@ What is written for the data class above is exactly:
 Things that are specific to C#:
 
 * **C# members have PascalCase names**, so give every member the key the API uses with `_forge_json_keys` (members without an entry keep their C# name as the key).
-* **Initialize members that hold a class** (`= new()`). A server's data cannot say which class to create, and Godot does not report the declared class of a C# object member, so loading fills the object that is already there (and keeps its class). A member that is `null` stays `null`.
+* **Initialize members that hold a class** (`= new()`). A server's data cannot say which class to create, and Godot does not report the declared class of a C# object member, so loading uses the object that is already there and keeps its class: a `GodotObject` or `Node` member is filled where it is (the same object stays, so there is nothing extra to free), a `RefCounted` or `Resource` member is replaced by a new object of the same class. A member that is `null` stays `null`.
 * The nested `AddressData` does not need `_forge_plain_json`: everything inside a plain class is plain.
 * A class name in a server's data (`"script_inheritance"`) is ignored. Nothing is created or loaded because a server asked for it.
 

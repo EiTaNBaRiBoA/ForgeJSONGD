@@ -107,3 +107,15 @@ Optional methods a class can define (all start with `_forge_`): `_forge_excluded
   * **Loading is forgiving, validation is strict:** loading reads `"5"` into an `int` and skips what does not fit; `validate_json` reports it. Validation never changes saving or loading.
   * **Security:** encrypt files with a key to protect them from editing, and register the allowed scripts if files can come from other people. See [security](docs/GDScript-Tutorial.md#security).
   * **Exact data:** ints stay ints (also above 2^53), floats keep every digit, text stays text, and dictionary keys keep their type. See [how](docs/GDScript-Tutorial.md#numbers-text-and-keys-stay-exact).
+
+## Tests
+
+About 1700 checks in 17 scenes (GDScript and C#) cover saving, loading, validation, the guides'
+examples and a real HTTP round trip. They are a Godot .NET project of their own in
+[tests/project](tests/project); one command builds and runs them all:
+
+```powershell
+.\run_tests.ps1 -Godot "C:\path\to\Godot_v4.7.2-stable_mono_win64_console.exe"
+```
+
+See [tests/README.md](tests/README.md) for what each scene covers.

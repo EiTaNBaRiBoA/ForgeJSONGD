@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3 uid="uid://m72p8k73bgng"]
+
+[ext_resource type="Script" uid="uid://tvj5w58qfi3t" path="res://Scenes/main.gd" id="1_77ol3"]
+[ext_resource type="Texture2D" uid="uid://sy0goydywf1y" path="res://icon.svg" id="2_bo1nx"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_77ol3")
+texture = ExtResource("2_bo1nx")

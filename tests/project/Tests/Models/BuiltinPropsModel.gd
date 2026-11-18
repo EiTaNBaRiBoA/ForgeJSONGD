@@ -1,0 +1,21 @@
+class_name BuiltinPropsModel extends RefCounted
+
+@export var rect: Rect2 = Rect2(1, 2, 3, 4)
+@export var recti: Rect2i = Rect2i(1, 2, 3, 4)
+@export var aabb: AABB = AABB(Vector3(1, 2, 3), Vector3(4, 5, 6))
+@export var plane: Plane = Plane(Vector3.UP, 2.0)
+@export var quat: Quaternion = Quaternion(Vector3.UP, 0.5)
+@export var basis: Basis = Basis.from_euler(Vector3(0.1, 0.2, 0.3))
+@export var t2: Transform2D = Transform2D(0.5, Vector2(3, 4))
+@export var t3: Transform3D = Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
+@export var projection: Projection = Projection.create_orthogonal(-1, 1, -1, 1, 0.1, 10)
+@export var bytes: PackedByteArray = PackedByteArray([1, 2, 3, 250])
+@export var empty_bytes: PackedByteArray = PackedByteArray()
+@export var strings: PackedStringArray = PackedStringArray(["a", "b"])
+@export var ints: PackedInt32Array = PackedInt32Array([1, 2, 3])
+@export var floats: PackedFloat32Array = PackedFloat32Array([1.5, 2.5])
+@export var vec2s: PackedVector2Array = PackedVector2Array([Vector2(1, 2), Vector2(3, 4)])
+@export var vec3s: PackedVector3Array = PackedVector3Array([Vector3(1, 2, 3)])
+@export var colors: PackedColorArray = PackedColorArray([Color.RED, Color.BLUE])
+@export var path: NodePath = NodePath("a/b")
+@export var tag: StringName = &"tag"

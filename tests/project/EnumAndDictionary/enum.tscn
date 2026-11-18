@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://d2e45l76kbcj6"]
+
+[ext_resource type="Script" uid="uid://bwbbrhgl1y3y5" path="res://EnumAndDictionary/enum.gd" id="1_fdjch"]
+
+[node name="Enum" type="Node2D"]
+script = ExtResource("1_fdjch")
+my_enum = 3
+my_enum2 = 2

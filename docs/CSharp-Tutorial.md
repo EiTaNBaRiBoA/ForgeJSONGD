@@ -79,7 +79,7 @@ var loaded = Forge.JsonFileToClass<Data>("user://data.json");
 GD.Print($"{loaded.Name}, {loaded.Age}"); // C-Sharp Player, 25
 ```
 
-That is it: `Forge.ClassToJson` + `Forge.StoreJsonFile` to save, `Forge.JsonFileToClass<T>` to load. Encryption works the same as in GDScript: pass a key as the last argument (`Forge.StoreJsonFile(path, json, "my_key")` and `Forge.JsonFileToClass<Data>(path, "my_key")`). Saving is safe the same way too: the file goes to `<path>.tmp` first and is then renamed over the old one, so a stopped program never leaves half a file.
+That is it: `Forge.ClassToJson` + `Forge.StoreJsonFile` to save, `Forge.JsonFileToClass<T>` to load. Encryption works the same as in GDScript: pass a key as the last argument (`Forge.StoreJsonFile(path, json, "my_key")` and `Forge.JsonFileToClass<Data>(path, "my_key")`). Saving is safe the same way too: the file goes to `<path>.tmp` first and is then renamed over the old one, so a stopped program never leaves half a file, and a failed save never removes the old one (details in the GDScript tutorial).
 
 Other ways in and out:
 

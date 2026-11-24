@@ -391,6 +391,29 @@ func test_safe_saving() -> void:
 	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path, "key")) == 7, "and found after a stop between the two steps")
 	DirAccess.remove_absolute(path)
 
+	# A rename can fail after the old file is gone (on Windows Godot's rename removes the old file
+	# first, and the move fails while another program holds the new one). The whole new data is
+	# then only in the temporary file: a load reads it even when it cannot rename it into place.
+	var whole_new: FileAccess = FileAccess.open(tmp, FileAccess.WRITE)
+	whole_new.store_string("{\"n\": 8}")
+	whole_new.close()
+	var holder: FileAccess = FileAccess.open(tmp, FileAccess.READ)
+	var moved: bool = DirAccess.rename_absolute(tmp, path) == OK
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path)) == 8, "a load reads the temporary file it cannot rename into place%s" % (" (the system let the rename through: nothing held)" if moved else ""))
+	holder.close()
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path)) == 8 and FileAccess.file_exists(path) and not FileAccess.file_exists(tmp), "and puts it in place once it can")
+
+	# A save whose rename fails never removes the old file itself: the old file stays while
+	# another program holds it, and the save says it failed.
+	var reader: FileAccess = FileAccess.open(path, FileAccess.READ)
+	var saved: bool = ForgeJSONGD.store_json_file(path, {"n": 9})
+	reader.close()
+	var now: int = _n(ForgeJSONGD.json_file_to_dict(path))
+	TestUtil.check((saved and now == 9) or (not saved and now == 8), "a save that cannot replace a held file keeps the old data (saved: %s, loaded %d)" % [saved, now])
+	for p: String in [path, tmp]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(p)
+
 
 
 ## The "n" of a loaded file (JSON numbers come back as floats), or -1.

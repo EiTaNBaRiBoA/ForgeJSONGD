@@ -107,16 +107,28 @@ static func _open_file(file_path: String, mode: FileAccess.ModeFlags, security_k
 	return FileAccess.open_encrypted_with_pass(file_path, mode, security_key)
 
 
-## Writes a dictionary as JSON to a file (indented with json_indent). Returns false on failure.
+## Writes a dictionary as JSON to a file (indented with json_indent). Returns false on failure, and the
+## old file stays as it was. A program can be stopped at any moment (Android ends a paused app), also
+## while it saves, so the file is never written in place: the JSON goes to "<path>.tmp" first, which
+## is then renamed over the old file. The file is always whole, with the old data or the new.
 static func _write_json_file(file_path: String, data: Dictionary, security_key: String = "") -> bool:
 	_check_dir(file_path)
-	var file: FileAccess = _open_file(file_path, FileAccess.WRITE, security_key)
+	var tmp_path: String = file_path + ".tmp"
+	var file: FileAccess = _open_file(tmp_path, FileAccess.WRITE, security_key)
 	if not file:
-		printerr("ForgeJSONGD: cannot write the file ", file_path)
+		printerr("ForgeJSONGD: cannot write the file ", tmp_path)
 		return false
 	file.store_string(_stringify(data, json_indent, sort_keys))
 	file.close()
-	return true
+	if DirAccess.rename_absolute(tmp_path, file_path) == OK:
+		return true
+	# Some systems do not rename over an existing file: remove it, then rename. If the program stops
+	# between the two steps, _read_json_file finds the whole .tmp file and puts it in place.
+	DirAccess.remove_absolute(file_path)
+	if DirAccess.rename_absolute(tmp_path, file_path) == OK:
+		return true
+	printerr("ForgeJSONGD: cannot replace the file ", file_path)
+	return false
 
 
 ## JSON.stringify, with full precision by default (floats keep every digit), fixed so the text is always valid JSON:
@@ -130,8 +142,12 @@ static func _stringify(data: Variant, indent: String = "", sort: bool = true, fu
 	return _vertical_tab_escape.sub(text, "$1\\u000b", true)
 
 
-## Reads a JSON file into a Dictionary. Returns an empty Dictionary on any failure.
+## Reads a JSON file into a Dictionary. Returns an empty Dictionary on any failure. A save stopped
+## between removing the old file and renaming the new one left only "<path>.tmp", whole: it is put in
+## its place first (a .tmp beside an existing file is a save stopped earlier, and is not used).
 static func _read_json_file(file_path: String, security_key: String = "") -> Dictionary:
+	if not FileAccess.file_exists(file_path) and FileAccess.file_exists(file_path + ".tmp"):
+		DirAccess.rename_absolute(file_path + ".tmp", file_path)
 	if not FileAccess.file_exists(file_path):
 		return {}
 	var file: FileAccess = _open_file(file_path, FileAccess.READ, security_key)

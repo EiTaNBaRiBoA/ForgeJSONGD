@@ -12,6 +12,7 @@ func _ready() -> void:
 	test_enums_without_values()
 	test_broken_hooks_do_not_leak_plain_mode()
 	test_objects_freed_by_hand()
+	test_safe_saving()
 	TestUtil.finish("Robustness", get_tree())
 
 
@@ -342,5 +343,58 @@ func test_objects_freed_by_hand() -> void:
 	ForgeJSONGD.class_to_json_schema(SharingOwner)
 	TestUtil.check(_object_count() == before and is_instance_valid(SharingOwner.common), "and never frees an object the class only points to (shared between instances)")
 	SharingOwner.common.free()
+
+#endregion
+
+
+#region Saving never leaves half a file
+
+## A program can be stopped at any moment (Android ends a paused app), also while it saves. The file is
+## written to "<path>.tmp" first and then renamed over the old one, so the file is always whole: the old
+## data or the new.
+func test_safe_saving() -> void:
+	var path: String = "user://safe_saving/data.json"
+	var tmp: String = path + ".tmp"
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	for p: String in [path, tmp]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(p)
+	TestUtil.check(ForgeJSONGD.store_json_file(path, {"n": 1}), "saving works")
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path)) == 1 and not FileAccess.file_exists(tmp), "the file holds the data, and no temporary file is left")
+	TestUtil.check(ForgeJSONGD.store_json_file(path, {"n": 2}) and _n(ForgeJSONGD.json_file_to_dict(path)) == 2, "saving again replaces the old file")
+
+	# Stopped after the new data was written and the old file removed, before the rename: loading uses the
+	# whole new file and puts it in its place.
+	DirAccess.remove_absolute(path)
+	var whole: FileAccess = FileAccess.open(tmp, FileAccess.WRITE)
+	whole.store_string("{\"n\": 3}")
+	whole.close()
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path)) == 3, "a load after a stop between the two steps gets the new data")
+	TestUtil.check(FileAccess.file_exists(path) and not FileAccess.file_exists(tmp), "and the file is in its place again")
+
+	# Stopped while the temporary file was being written: the old file is untouched and is what loads.
+	var half: FileAccess = FileAccess.open(tmp, FileAccess.WRITE)
+	half.store_string("{\"n\": 4, \"li")
+	half.close()
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path)) == 3, "a half-written temporary file does not replace the whole old file")
+	TestUtil.check(ForgeJSONGD.store_json_file(path, {"n": 5}) and _n(ForgeJSONGD.json_file_to_dict(path)) == 5 and not FileAccess.file_exists(tmp), "the next save writes over it")
+
+	# A save that cannot write leaves the old file as it was.
+	DirAccess.make_dir_recursive_absolute(tmp)
+	TestUtil.check(not ForgeJSONGD.store_json_file(path, {"n": 6}), "a save that cannot write its temporary file fails")
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path)) == 5, "and the old file is untouched")
+	DirAccess.remove_absolute(tmp)
+
+	# The same with a security key.
+	TestUtil.check(ForgeJSONGD.store_json_file(path, {"n": 7}, "key") and _n(ForgeJSONGD.json_file_to_dict(path, "key")) == 7 and not FileAccess.file_exists(tmp), "an encrypted file is saved the same way")
+	DirAccess.rename_absolute(path, tmp)
+	TestUtil.check(_n(ForgeJSONGD.json_file_to_dict(path, "key")) == 7, "and found after a stop between the two steps")
+	DirAccess.remove_absolute(path)
+
+
+
+## The "n" of a loaded file (JSON numbers come back as floats), or -1.
+func _n(data: Dictionary) -> int:
+	return int(data.get("n", -1))
 
 #endregion

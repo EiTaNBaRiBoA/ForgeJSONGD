@@ -80,7 +80,7 @@ All methods are static: call them as `ForgeJSONGD.method(...)`.
 |---|---|
 | `class_to_json(object, specify_class = false) -> Dictionary` | Object to a JSON dictionary |
 | `class_to_json_string(object, specify_class = false) -> String` | Object to JSON text |
-| `store_json_file(path, data, security_key = "") -> bool` | Write a dictionary to a file (encrypted if a key is given) |
+| `store_json_file(path, data, security_key = "") -> bool` | Write a dictionary to a file (encrypted if a key is given), never leaving half a file |
 | `json_to_class(script_or_instance, json) -> Object` | Dictionary to an object |
 | `json_string_to_class(script_or_instance, json_string) -> Object` | JSON text to an object (`null` if invalid) |
 | `json_file_to_class(script_or_instance, path, security_key = "") -> Object` | File to an object |
@@ -106,6 +106,7 @@ Optional methods a class can define (all start with `_forge_`): `_forge_excluded
   * **Web APIs:** mark the data classes you send to or receive from an API with `_forge_plain_json`. Without it the format is the exact one made for save files, with class names and markers that an API does not expect.
   * **Loading is forgiving, validation is strict:** loading reads `"5"` into an `int` and skips what does not fit; `validate_json` reports it. Validation never changes saving or loading.
   * **Security:** encrypt files with a key to protect them from editing, and register the allowed scripts if files can come from other people. See [security](docs/GDScript-Tutorial.md#security).
+  * **Safe saving:** a save goes to `<path>.tmp` and is then renamed over the old file, so a program stopped while saving never leaves half a file; the next load picks up a save stopped between the two steps. See [store_json_file](docs/GDScript-Tutorial.md#store_json_filefile_path-string-data-dictionary-security_key-string----bool).
   * **Exact data:** ints stay ints (also above 2^53), floats keep every digit, text stays text, and dictionary keys keep their type. See [how](docs/GDScript-Tutorial.md#numbers-text-and-keys-stay-exact).
 
 ## Tests

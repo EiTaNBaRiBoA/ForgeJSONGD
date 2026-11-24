@@ -447,6 +447,8 @@ Same as above, but returns JSON text.
 
 Writes `data` to a file as JSON with tab indentation. Creates missing folders. If `security_key` is not empty the file is encrypted. Returns `true` on success and `false` (with an error printed) when the file cannot be written.
 
+The file is never written in place: the JSON goes to `<path>.tmp` first, which is then renamed over the old file, so a program stopped while saving (Android ends a paused app at any moment) never leaves half a file: the file holds the old data or the new. When a save was stopped between removing the old file and renaming the new one, the next load (`json_file_to_dict`, `json_file_to_class`) finds the whole `.tmp` file and puts it in place; a `.tmp` file beside an existing file is a save stopped earlier and is not used. A save that fails leaves the old file as it was.
+
 #### `convert_array_to_json(array: Array) -> Array` and `convert_dictionary_to_json(dictionary: Dictionary) -> Dictionary`
 
 Convert a container of objects and values on its own, using the same rules as above. Useful when the thing you want to save is an array or dictionary instead of one object:
